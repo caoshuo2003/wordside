@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.zip binary
+*.gz binary
+
+# Preserve the exact original parser fixture, including upstream whitespace.
+modules/cambridge-dictionary-api/tests/upstream/data.js -whitespace

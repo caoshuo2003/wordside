@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "none",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "strict": true,
+    "noEmitOnError": true,
+    "outFile": "app.js"
+  },
+  "files": [
+    "src/native-api.ts",
+    "../shared/dictionary.ts",
+    "src/presentation.ts",
+    "src/app.ts",
+    "src/native.ts"
+  ]
+}

@@ -1,0 +1,646 @@
+{
+  "origin": "Synthetic compatibility fixtures generated with existing parser and original upstream oracle",
+  "pages": [
+    {
+      "name": "original-rich-entry",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "entry": {
+        "word": "example",
+        "pos": [
+          "noun"
+        ],
+        "pronunciation": [
+          {
+            "pos": "noun",
+            "lang": "uk",
+            "url": "https://dictionary.cambridge.org/media/test.mp3",
+            "pron": "/test/"
+          },
+          {
+            "pos": "noun",
+            "lang": "us",
+            "url": "https://dictionary.cambridge.org/us/media/test.mp3",
+            "pron": "/test/"
+          }
+        ],
+        "definition": [
+          {
+            "id": 0,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "A synthetic meaning for a test.",
+            "translation": "测试释义；补充译文",
+            "example": [
+              {
+                "id": 0,
+                "text": "This is one example.",
+                "translation": "这是一个例句。"
+              },
+              {
+                "id": 1,
+                "text": "An untranslated example.",
+                "translation": ""
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "Another synthetic meaning.",
+            "translation": "",
+            "example": [
+              {
+                "id": 0,
+                "text": "A second sense example.",
+                "translation": "另一个释义的例句。"
+              }
+            ]
+          }
+        ],
+        "verbs": []
+      }
+    },
+    {
+      "name": "preserve-whitespace-entities-and-duplicate-pos",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\"> A  synthetic\n<b>meaning &amp; text</b>  for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div><span class=\"pos dpos\">noun</span></body></html>",
+      "entry": {
+        "word": "example",
+        "pos": [
+          "noun"
+        ],
+        "pronunciation": [
+          {
+            "pos": "noun",
+            "lang": "uk",
+            "url": "https://dictionary.cambridge.org/media/test.mp3",
+            "pron": "/test/"
+          },
+          {
+            "pos": "noun",
+            "lang": "us",
+            "url": "https://dictionary.cambridge.org/us/media/test.mp3",
+            "pron": "/test/"
+          }
+        ],
+        "definition": [
+          {
+            "id": 0,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": " A  synthetic\nmeaning & text  for a test.",
+            "translation": "测试释义；补充译文",
+            "example": [
+              {
+                "id": 0,
+                "text": "This is one example.",
+                "translation": "这是一个例句。"
+              },
+              {
+                "id": 1,
+                "text": "An untranslated example.",
+                "translation": ""
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "Another synthetic meaning.",
+            "translation": "",
+            "example": [
+              {
+                "id": 0,
+                "text": "A second sense example.",
+                "translation": "另一个释义的例句。"
+              }
+            ]
+          }
+        ],
+        "verbs": []
+      }
+    },
+    {
+      "name": "source-is-optional",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "entry": {
+        "word": "example",
+        "pos": [
+          "noun"
+        ],
+        "pronunciation": [
+          {
+            "pos": "noun",
+            "lang": "uk",
+            "url": "https://dictionary.cambridge.org/media/test.mp3",
+            "pron": "/test/"
+          },
+          {
+            "pos": "noun",
+            "lang": "us",
+            "url": "https://dictionary.cambridge.org/us/media/test.mp3",
+            "pron": "/test/"
+          }
+        ],
+        "definition": [
+          {
+            "id": 0,
+            "pos": "noun",
+            "text": "A synthetic meaning for a test.",
+            "translation": "测试释义；补充译文",
+            "example": [
+              {
+                "id": 0,
+                "text": "This is one example.",
+                "translation": "这是一个例句。"
+              },
+              {
+                "id": 1,
+                "text": "An untranslated example.",
+                "translation": ""
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "pos": "noun",
+            "text": "Another synthetic meaning.",
+            "translation": "",
+            "example": [
+              {
+                "id": 0,
+                "text": "A second sense example.",
+                "translation": "另一个释义的例句。"
+              }
+            ]
+          }
+        ],
+        "verbs": []
+      }
+    },
+    {
+      "name": "bare-english-definition",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic meaning without examples.</div></div></div></div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "entry": {
+        "word": "example",
+        "pos": [
+          "noun"
+        ],
+        "pronunciation": [
+          {
+            "pos": "noun",
+            "lang": "uk",
+            "url": "https://dictionary.cambridge.org/media/test.mp3",
+            "pron": "/test/"
+          },
+          {
+            "pos": "noun",
+            "lang": "us",
+            "url": "https://dictionary.cambridge.org/us/media/test.mp3",
+            "pron": "/test/"
+          }
+        ],
+        "definition": [
+          {
+            "id": 0,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "A synthetic meaning for a test.",
+            "translation": "测试释义；补充译文",
+            "example": [
+              {
+                "id": 0,
+                "text": "This is one example.",
+                "translation": "这是一个例句。"
+              },
+              {
+                "id": 1,
+                "text": "An untranslated example.",
+                "translation": ""
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "Another synthetic meaning.",
+            "translation": "",
+            "example": [
+              {
+                "id": 0,
+                "text": "A second sense example.",
+                "translation": "另一个释义的例句。"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "A synthetic meaning without examples.",
+            "translation": "",
+            "example": []
+          }
+        ],
+        "verbs": []
+      }
+    },
+    {
+      "name": "complete-tail-comments",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>\n<!-- synthetic --> \n",
+      "entry": {
+        "word": "example",
+        "pos": [
+          "noun"
+        ],
+        "pronunciation": [
+          {
+            "pos": "noun",
+            "lang": "uk",
+            "url": "https://dictionary.cambridge.org/media/test.mp3",
+            "pron": "/test/"
+          },
+          {
+            "pos": "noun",
+            "lang": "us",
+            "url": "https://dictionary.cambridge.org/us/media/test.mp3",
+            "pron": "/test/"
+          }
+        ],
+        "definition": [
+          {
+            "id": 0,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "A synthetic meaning for a test.",
+            "translation": "测试释义；补充译文",
+            "example": [
+              {
+                "id": 0,
+                "text": "This is one example.",
+                "translation": "这是一个例句。"
+              },
+              {
+                "id": 1,
+                "text": "An untranslated example.",
+                "translation": ""
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "Another synthetic meaning.",
+            "translation": "",
+            "example": [
+              {
+                "id": 0,
+                "text": "A second sense example.",
+                "translation": "另一个释义的例句。"
+              }
+            ]
+          }
+        ],
+        "verbs": []
+      }
+    },
+    {
+      "name": "truncated",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "missing-def",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"broken\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "missing-body",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"broken\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "missing-example-text",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"broken\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "orphan-body",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div><div class=\"def-body ddef_b\"></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "orphan-translation",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><span class=\"trans dtrans\">Orphan.</span><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "orphan-example",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic meaning without examples.<div class=\"examp dexamp\"><span class=\"eg deg\">Moved.</span></div></div></div></div></div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "double-body",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic meaning without examples.<div class=\"def-body ddef_b\"></div><div class=\"def-body ddef_b\"></div></div></div></div></div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "landing",
+      "html": "<html><head><title>Cambridge dictionary</title><link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/\"></head><body>Dictionary index</body></html>",
+      "error": {
+        "status": 404,
+        "code": "WORD_NOT_FOUND"
+      }
+    },
+    {
+      "name": "arbitrary",
+      "html": "<html><body>Unexpected response</body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "challenge-title",
+      "html": "<html><head><title>Just a moment</title><link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/\"></head><body>Dictionary index</body></html>",
+      "error": {
+        "status": 502,
+        "code": "CAMBRIDGE_BLOCKED"
+      }
+    },
+    {
+      "name": "challenge-form",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body><form id=\"challenge-form\"></form>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "CAMBRIDGE_BLOCKED"
+      }
+    }
+  ],
+  "suggestions": [
+    {
+      "name": "ordered-en",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=terminal\">terminal</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=terminals\">terminals</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en",
+      "query": "termnal",
+      "words": [
+        "terminal",
+        "terminals"
+      ]
+    },
+    {
+      "name": "empty-en",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1>Your search terms did not match any entries.</h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/browse/english/t/\">browse range</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "ordered-uk",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/uk/spellcheck/english/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/uk/search/english/direct/?q=terminal\">terminal</a></li><li><a href=\"https://dictionary.cambridge.org/uk/search/english/direct/?q=terminals\">terminals</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "uk",
+      "query": "termnal",
+      "words": [
+        "terminal",
+        "terminals"
+      ]
+    },
+    {
+      "name": "empty-uk",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/uk/spellcheck/english/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1>Your search terms did not match any entries.</h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/browse/english/t/\">browse range</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "uk",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "ordered-en-cn",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminals\">terminals</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": [
+        "terminal",
+        "terminals"
+      ]
+    },
+    {
+      "name": "empty-en-cn",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1>Your search terms did not match any entries.</h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/browse/english/t/\">browse range</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "ordered-en-tw",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-traditional/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-traditional/direct/?q=terminal\">terminal</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-traditional/direct/?q=terminals\">terminals</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-traditional/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-tw",
+      "query": "termnal",
+      "words": [
+        "terminal",
+        "terminals"
+      ]
+    },
+    {
+      "name": "empty-en-tw",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-traditional/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1>Your search terms did not match any entries.</h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/browse/english/t/\">browse range</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-traditional/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-tw",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "heading-whitespace",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for\t<span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminals\">terminals</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": [
+        "terminal",
+        "terminals"
+      ]
+    },
+    {
+      "name": "candidate-bom",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=%EF%BB%BFterminal%EF%BB%BF\">﻿terminal﻿</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": [
+        "terminal"
+      ]
+    },
+    {
+      "name": "uk-redirect-root",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/spellcheck/english/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/search/english/direct/?q=terminal\">terminal</a></li><li><a href=\"https://dictionary.cambridge.org/search/english/direct/?q=terminals\">terminals</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "uk",
+      "query": "termnal",
+      "words": [
+        "terminal",
+        "terminals"
+      ]
+    },
+    {
+      "name": "limits",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=termnal\">termnal</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=Terminal\">Terminal</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminals\">terminals</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=bad%2Fpath\">bad/path</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=%3Cimg%3E\">&lt;img&gt;</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=hello%0Aworld\">hello\nworld</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate0\">candidate0</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate1\">candidate1</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate2\">candidate2</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate3\">candidate3</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate4\">candidate4</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate5\">candidate5</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate6\">candidate6</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate7\">candidate7</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate8\">candidate8</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate9\">candidate9</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate10\">candidate10</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate11\">candidate11</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate12\">candidate12</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate13\">candidate13</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate14\">candidate14</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate15\">candidate15</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate16\">candidate16</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate17\">candidate17</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate18\">candidate18</a></li><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=candidate19\">candidate19</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": [
+        "terminal",
+        "terminals",
+        "hello world",
+        "candidate0",
+        "candidate1",
+        "candidate2",
+        "candidate3",
+        "candidate4",
+        "candidate5",
+        "candidate6"
+      ]
+    },
+    {
+      "name": "foreign-link",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://example.com/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "wrong-dataset",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "wrong-label",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=other\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "browse-link",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/browse/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "link-credentials",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://user@dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "duplicate-q",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal&amp;q=other\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "words": []
+    },
+    {
+      "name": "truncated",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "wrong-search",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"other\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "foreign-source",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://example.com/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "source-credentials",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://user@dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "wrong-heading",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">other</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "missing-list",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"changed\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "changed-heading",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Changed heading <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "challenge",
+      "html": "<html><head><title>Synthetic Cambridge spellcheck</title><meta property=\"og:url\" content=\"https://dictionary.cambridge.org/us/spellcheck/english-chinese-simplified/\"></head><body><form id=\"challenge-form\"></form><input id=\"searchword\" value=\"termnal\"><main><div><h1 class=\"lpb-10 lbb\">Search suggestions for <span class=\"tb\">termnal</span></h1><p>Synthetic similar spellings</p><ul class=\"hul-u\"><li><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=terminal\">terminal</a></li></ul></div></main><nav><a href=\"https://dictionary.cambridge.org/us/search/english-chinese-simplified/direct/?q=navigation\">navigation</a></nav></body></html>",
+      "language": "en-cn",
+      "query": "termnal",
+      "error": {
+        "status": 502,
+        "code": "CAMBRIDGE_BLOCKED"
+      }
+    }
+  ]
+}

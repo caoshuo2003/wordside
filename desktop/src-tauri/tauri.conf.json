@@ -1,0 +1,67 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "WordSide",
+  "version": "0.1.0",
+  "identifier": "local.wordside.dictionary.api-preview",
+  "build": {
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "WordSide · 桌面划词词典",
+        "url": "index.html",
+        "width": 440,
+        "height": 540,
+        "minWidth": 400,
+        "minHeight": 520
+      },
+      {
+        "label": "popup",
+        "title": "WordSide · 释义",
+        "url": "index.html?popup=1",
+        "width": 360,
+        "height": 600,
+        "visible": false,
+        "focus": false,
+        "decorations": false,
+        "resizable": true,
+        "skipTaskbar": true,
+        "alwaysOnTop": true,
+        "minWidth": 320,
+        "minHeight": 360,
+        "maximizable": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src https://dictionary.cambridge.org; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/ciban.ico",
+      "icons/ciban-128.png"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "SimpChinese",
+          "English"
+        ],
+        "displayLanguageSelector": true,
+        "installerIcon": "icons/ciban.ico",
+        "uninstallerIcon": "icons/ciban.ico"
+      }
+    },
+    "resources": {
+      "generated/THIRD-PARTY-LICENSES.txt": "THIRD-PARTY-LICENSES.txt"
+    }
+  }
+}

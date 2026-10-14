@@ -1,0 +1,23 @@
+name: 功能或实验想法
+description: 先明确场景和验证方式
+title: "[Idea] "
+body:
+  - type: textarea
+    id: use_case
+    attributes:
+      label: 想解决什么问题
+      description: 描述实际使用场景
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 方案与最小实验
+      description: 先做什么，哪些内容以后再考虑
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完成条件
+      description: 如何判断功能有用、准确且没有明显回归
+    validations:
+      required: true

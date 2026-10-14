@@ -1,0 +1,27 @@
+node_modules/
+desktop/dist/
+desktop/app.js
+desktop/src-tauri/target/
+desktop/src-tauri/dictionary-runtime/
+desktop/src-tauri/generated/
+release/
+.delivery/
+.artifacts/
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.db
+__pycache__/
+*.pyc
+.venv/
+.browser*/
+*browser*profile*/
+.DS_Store
+Thumbs.db
+
+# Local agent instructions and generated Tauri schemas are not product source.
+/AGENTS.md
+/WORK-STATUS.md
+desktop/src-tauri/gen/

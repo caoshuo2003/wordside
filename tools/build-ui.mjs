@@ -1,0 +1,14 @@
+import { mkdirSync, copyFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
+const root=dirname(dirname(fileURLToPath(import.meta.url)));
+const local=join(root,'.tools/typescript/package/bin/tsc');
+const compiler=existsSync(local)?local:join(root,'node_modules/typescript/bin/tsc');
+const desktop=join(root,'desktop');
+const result=spawnSync(process.execPath,[compiler,'-p',join(desktop,'tsconfig.json'),...(process.argv.includes('--check')?['--noEmit']:[])],{stdio:'inherit'});
+if(result.status!==0)process.exit(result.status||1);
+if(process.argv.includes('--check'))process.exit(0);
+mkdirSync(join(desktop,'dist'),{recursive:true});
+for(const file of ['index.html','style.css','app.js','samples.js','ciban-icon.png'])copyFileSync(join(desktop,file),join(desktop,'dist',file));
+console.log('TypeScript compiled and desktop frontend staged.');

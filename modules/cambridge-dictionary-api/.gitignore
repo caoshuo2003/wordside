@@ -1,0 +1,5 @@
+.idea
+.vercel
+node_modules/
+release/
+*.log

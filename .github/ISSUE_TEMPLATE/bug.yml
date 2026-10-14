@@ -1,0 +1,23 @@
+name: 问题反馈
+description: 记录一个可复现的问题
+title: "[Bug] "
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: 环境
+      description: WordSide 版本、Windows/终端版本、发生问题的应用与文本区域
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤与实际结果
+      description: 如何触发，应该怎样，实际怎样；不要上传私人文本或凭据
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 修复完成条件
+      description: 用什么操作可以确认问题已修复

@@ -1,0 +1,29 @@
+[package]
+name = "wordside"
+version = "0.1.0"
+edition = "2021"
+description = "A desktop selection dictionary"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "system-proxy"] }
+tokio = { version = "1", features = ["time", "macros", "sync", "net", "io-util"] }
+tempfile = "3"
+dom_query = { version = "=0.28.0", default-features = false }
+regex = "1"
+open = "5"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_UI_Accessibility", "Win32_System_Com", "Win32_Foundation", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_Security"] }
+
+[profile.release]
+strip = true
+lto = "thin"
+opt-level = "s"
+codegen-units = 1

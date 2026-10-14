@@ -1,0 +1,11 @@
+{
+  "identifier": "desktop",
+  "windows": [
+    "main",
+    "popup"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}

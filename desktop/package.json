@@ -1,0 +1,14 @@
+{
+  "name": "wordside-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node ../tools/build-ui.mjs",
+    "check": "node ../tools/build-ui.mjs --check",
+    "bundle": "node ../tools/build-licenses.mjs && node ../tools/build-ui.mjs && tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.1",
+    "typescript": "5.9.3"
+  }
+}

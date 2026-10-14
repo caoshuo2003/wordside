@@ -1,0 +1,162 @@
+[
+  {
+    "raw": " `terminal,` ",
+    "expected": "terminal"
+  },
+  {
+    "raw": "“runtime”。",
+    "expected": "runtime"
+  },
+  {
+    "raw": "(runtime),",
+    "expected": "runtime"
+  },
+  {
+    "raw": "runtime()",
+    "expected": "runtime"
+  },
+  {
+    "raw": "<runtime>",
+    "expected": "runtime"
+  },
+  {
+    "raw": "【runtime】",
+    "expected": "runtime"
+  },
+  {
+    "raw": "「runtime」",
+    "expected": "runtime"
+  },
+  {
+    "raw": "…runtime…",
+    "expected": "runtime"
+  },
+  {
+    "raw": "• runtime |",
+    "expected": "runtime"
+  },
+  {
+    "raw": "_runtime_",
+    "expected": "runtime"
+  },
+  {
+    "raw": "**runtime**",
+    "expected": "runtime"
+  },
+  {
+    "raw": "runtime=",
+    "expected": "runtime"
+  },
+  {
+    "raw": "#runtime!",
+    "expected": "runtime"
+  },
+  {
+    "raw": " + runtime & ",
+    "expected": "runtime"
+  },
+  {
+    "raw": "don’t",
+    "expected": "don't"
+  },
+  {
+    "raw": "rock ’n’ roll",
+    "expected": "rock 'n' roll"
+  },
+  {
+    "raw": "run-time",
+    "expected": "run-time"
+  },
+  {
+    "raw": " one  two three ",
+    "expected": "one two three"
+  },
+  {
+    "raw": "terminal\r\n",
+    "expected": "terminal"
+  },
+  {
+    "raw": "termnal",
+    "expected": "termnal"
+  },
+  {
+    "raw": "--runtime",
+    "expected": null
+  },
+  {
+    "raw": "-runtime",
+    "expected": null
+  },
+  {
+    "raw": "foo\nbar",
+    "expected": null
+  },
+  {
+    "raw": "foo\tbar",
+    "expected": null
+  },
+  {
+    "raw": "C:\\Users\\Admin",
+    "expected": null
+  },
+  {
+    "raw": "/usr/bin/runtime",
+    "expected": null
+  },
+  {
+    "raw": "https://example.com",
+    "expected": null
+  },
+  {
+    "raw": "foo/bar",
+    "expected": null
+  },
+  {
+    "raw": "runtime.log",
+    "expected": null
+  },
+  {
+    "raw": "rm -rf /",
+    "expected": null
+  },
+  {
+    "raw": "one two three four five six",
+    "expected": null
+  },
+  {
+    "raw": "12345",
+    "expected": null
+  },
+  {
+    "raw": "***",
+    "expected": null
+  },
+  {
+    "raw": "中文runtime",
+    "expected": null
+  },
+  {
+    "raw": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "expected": null
+  },
+  {
+    "raw": "(((((((((((((((((((((xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)",
+    "expected": null
+  },
+  {
+    "raw": "",
+    "expected": null
+  },
+  {
+    "raw": "﻿runtime﻿",
+    "expected": "runtime"
+  },
+  {
+    "raw": "one﻿two",
+    "expected": "one two"
+  },
+  {
+    "raw": "runtime",
+    "expected": null
+  }
+]
