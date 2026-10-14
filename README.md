@@ -49,6 +49,10 @@
 
 查询词会发送到 Cambridge；个人设置保存在本机，词条只在内存中短期缓存，退出后清空。详细说明见[隐私与本地数据](docs/PRIVACY.md)。
 
+## 已知问题
+
+**偶发无法使用**：如果软件突然无法正常使用，可在 Windows 右下角托盘右键 WordSide，选择“退出 WordSide”，再重新打开。已记录的一次异常通过此方式恢复；问题尚未再次复现，暂未修复。
+
 ## 参考项目与致谢
 
 **WordSide 的 Cambridge 解析实现基于 [Nongfsq/cambridge-dictionary-api](https://github.com/Nongfsq/cambridge-dictionary-api) 修改与移植。** 该项目继承自 [chenelias/cambridge-dictionary-api](https://github.com/chenelias/cambridge-dictionary-api)，保留了原作者 **EliasChen** 的署名与 MIT 许可。感谢原项目提供的解析实现。
