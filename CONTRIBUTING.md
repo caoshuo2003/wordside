@@ -1,6 +1,6 @@
 # 项目维护与贡献
 
-WordSide 的源码已在 [caoshuo2003/wordside](https://github.com/caoshuo2003/wordside) 公开。欢迎通过 Issue 报告问题、讨论想法；代码许可见 [NOTICE](NOTICE.md)。
+WordSide · 词伴的源码已在 [caoshuo2003/wordside](https://github.com/caoshuo2003/wordside) 公开。欢迎通过 Issue 报告问题、讨论想法；代码许可见 [NOTICE](NOTICE.md)。
 
 **main 保存可发布代码；每项改动使用一条短期分支，通过 PR 检查和合并。**
 

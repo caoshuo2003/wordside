@@ -1,4 +1,4 @@
-# WordSide 桌面端
+# WordSide · 词伴桌面端
 
 当前 **0.1.0 预发布版**，Windows x64。TypeScript 提供设置与释义浮窗，Tauri / Rust 在桌面程序内访问 Cambridge。
 

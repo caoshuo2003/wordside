@@ -1,12 +1,16 @@
 # 常见问题
 
-[下载 WordSide](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.0) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
+[下载 WordSide · 词伴](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.0) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
 
 ## 安装与运行
 
 **第一次使用应该下载哪个文件？**
 
 推荐 `WordSide_0.1.0_x64-setup.exe`，按提示安装即可。希望解压使用时，选择 `WordSide_0.1.0-portable.zip`，解压全部文件后运行其中的程序。
+
+**为什么默认安装在 AppData\Local，而不是 Program Files？**
+
+安装版默认只为当前 Windows 用户安装，程序位于 `%LOCALAPPDATA%` 下，通常无需管理员权限。`Program Files` 通常用于所有用户安装，两种方式都可正常使用。
 
 **打开时提示缺少 WebView2 怎么办？**
 

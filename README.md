@@ -1,7 +1,7 @@
 <p align="center">
-  <img src="desktop/ciban-icon.png" width="88" alt="WordSide 图标">
+  <img src="desktop/ciban-icon.png" width="88" alt="WordSide · 词伴图标">
 </p>
-<h1 align="center">WordSide</h1>
+<h1 align="center">WordSide · 词伴</h1>
 <p align="center">选中一个词，读懂它。<br>一个安静、紧凑的 Windows 划词词典。</p>
 <p align="center"><strong>0.1.0 预发布版 · Windows x64 · Cambridge Dictionary</strong></p>
 <p align="center">
@@ -11,9 +11,9 @@
   <a href="docs/PRIVACY.md">隐私与数据</a>
 </p>
 
-WordSide 是一款 Windows 划词词典，帮你在阅读旁查看 Cambridge Dictionary 的释义、音标、例句与发音。开启自动划词后，在支持读取选区的应用里选中英文单词，即可弹出浮窗；也可以按快捷键主动查询。
+**WordSide · 词伴** 是一款 Windows 划词词典，帮你在阅读旁查看 Cambridge Dictionary 的释义、音标、例句与发音。开启自动划词后，在支持读取选区的应用里选中英文单词，即可弹出浮窗；也可以按快捷键主动查询。
 
-![WordSide 日间与夜间界面](docs/images/overview.png)
+![WordSide · 词伴日间与夜间界面](docs/images/overview.png)
 
 *界面预览，使用示例词条。[图片说明](docs/SCREENSHOTS.md)*
 

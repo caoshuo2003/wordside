@@ -2,7 +2,7 @@
 
 ## 从 Nongfsq 项目开始
 
-WordSide 使用 **[Nongfsq/cambridge-dictionary-api](https://github.com/Nongfsq/cambridge-dictionary-api)** 作为 Cambridge 查询与解析的基础。获取来源为公开 `main` 分支，记录日期为 **2026-10-13**。
+WordSide · 词伴使用 **[Nongfsq/cambridge-dictionary-api](https://github.com/Nongfsq/cambridge-dictionary-api)** 作为 Cambridge 查询与解析的基础。获取来源为公开 `main` 分支，记录日期为 **2026-10-13**。
 
 Nongfsq 仓库继承自 **[chenelias/cambridge-dictionary-api](https://github.com/chenelias/cambridge-dictionary-api)**，原作者署名 **EliasChen**。原 MIT 许可证完整保留，详见[原许可证](../modules/cambridge-dictionary-api/LICENSE.txt)。感谢原项目提供的网页解析实现与字段结构。
 
