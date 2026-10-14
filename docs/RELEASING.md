@@ -30,7 +30,7 @@ WordSide_<版本>-portable.zip
 THIRD-PARTY-LICENSES_<版本>.txt
 ```
 
-便携包包含主程序、同版许可、使用和验证说明；不会打包 Node、用户偏好或词条缓存。用 `tools/check-release.ps1` 检查大小和版本，核对 ZIP 清单。真实桌面与安装未测时明确写出，不把构建成功写成安装通过。
+便携包包含主程序、同版许可和使用说明。用 `tools/check-release.ps1` 检查版本与大小，核对 ZIP 清单；发布说明应写清用户可用的功能、运行要求、已知限制和实际验证范围。
 
 ## 3 · 合入与打标签
 
@@ -47,10 +47,16 @@ git push origin v0.1.1
 
 ## 4 · 发布并核对
 
-GitHub CLI 已登录且对私有仓库有权限时，可运行：
+GitHub CLI 已登录且具有仓库发布权限时，可运行：
 
 ```sh
-gh release create v0.1.1 --repo caoshuo2003/wordside --verify-tag --prerelease   --title "WordSide 0.1.1" --notes-file docs/releases/v0.1.1.md   release/WordSide_0.1.1.exe release/WordSide_0.1.1_x64-setup.exe   release/WordSide_0.1.1-portable.zip release/THIRD-PARTY-LICENSES_0.1.1.txt
+gh release create v0.1.1 --repo caoshuo2003/wordside \
+  --verify-tag --prerelease \
+  --title "WordSide 0.1.1" --notes-file docs/releases/v0.1.1.md \
+  release/WordSide_0.1.1.exe release/WordSide_0.1.1_x64-setup.exe \
+  release/WordSide_0.1.1-portable.zip release/THIRD-PARTY-LICENSES_0.1.1.txt
 ```
 
-核对私有性、main/tag 对应提交、Release 附件与 CI 实际结果。Windows 未签名安装包和真实安装验收状态应如实说明；不要自动启用发布流水线或更改仓库可见性。
+发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。预发布阶段保留 `--prerelease` 标记，完整实机验收记录补齐后再评估正式发布。
+
+README 负责介绍和下载，使用指南负责操作，FAQ 负责排查，Release 说明本版变化与已知限制，开发指南负责环境和构建。只更新受本次改动影响的内容，保持链接和版本一致。

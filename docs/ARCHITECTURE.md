@@ -42,4 +42,4 @@ Cambridge 解析基于 Nongfsq 项目。`modules/cambridge-dictionary-api/` 保�
 
 ## 当前范围
 
-发布目标是 Windows x64 桌面词典。AI、词形模块、Linux 和服务器端均不在当前产品里。没有独立的常驻本机 HTTP 服务。
+当前发布目标为 Windows x64 桌面词典，查询由应用内的 Rust 模块执行。后续工作见[路线图](ROADMAP.md)。

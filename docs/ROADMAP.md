@@ -8,7 +8,7 @@
 | 近期 | Cambridge 短语跳转 | 精确核对查询与头词，避免无关跳转，保留合法别名 | `fix/phrase-resolution` |
 | 近期 | 冷查询耗时分析 | 分开测连接、网页、解析与 UI，区分缓存/网络 | `exp/lookup-latency` |
 | 以后 | 代理设置界面 | 明确系统/自定义代理优先级，不修改系统配置 | `feat/proxy-settings` |
-| 以后 | Linux / CLI / tmux | 独立平台入口，桌面不常驻服务器组件 | `feat/terminal-client` |
+| 以后 | Linux / CLI / tmux | 为不同平台提供适合的取词与文本查词入口 | `feat/terminal-client` |
 | 探索 | AI 翻译 | 明确场景、成本、开关与隐私，不替换准确词典内容 | `exp/ai-translation` |
 
 已有连接复用、有限内存缓存与超时/取消恢复。性能提升以实测为依据；实验确认有益后，拆成可以独立验收的改动。

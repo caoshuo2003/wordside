@@ -16,9 +16,11 @@ Node 与 pnpm 是开发工具，不进入桌面发布包。依赖按锁文件安
 
 ## 安装与快速检查
 
-在仓库根执行：
+首次获取项目并运行检查：
 
 ```sh
+git clone https://github.com/caoshuo2003/wordside.git
+cd wordside
 npm ci
 npm exec --yes --package=pnpm@9.15.9 -- pnpm --dir modules/cambridge-dictionary-api install --frozen-lockfile
 npm test
@@ -55,7 +57,7 @@ desktop/src-tauri/target/release/bundle/nsis/WordSide_0.1.0_x64-setup.exe
 
 若指定 CARGO_TARGET_DIR，输出位于对应缓存目录。生成许可在 `desktop/src-tauri/generated/`，Tauri schema 在 `gen/`，均不提交源码。
 
-默认原生 test 检查 HTTP、解析、取消、缓存、设置与纯逻辑；跳过 `capture::` / `dismissal::`。可以用 `-TestFilter capture::shortcut::` 单独检查纯快捷键解析；这项同样不操作桌面。过滤和跳过不算通过用例。真实选词、焦点、DPI、托盘与安装应另列手动验收，见[发布说明](releases/v0.1.0.md)。
+默认原生 test 检查 HTTP、解析、取消、缓存、设置与纯逻辑；跳过 `capture::` / `dismissal::`。可以用 `-TestFilter 'capture::shortcut::'` 单独检查纯快捷键解析；这项同样不操作桌面。过滤和跳过不算通过用例。真实选词、焦点、DPI、托盘与安装应另列手动验收，见[发布说明](releases/v0.1.0.md)。
 
 ## 解析对照与诊断
 
@@ -87,7 +89,7 @@ npm test
 - Linux：锁文件安装、JS 测试、TypeScript 与 UI 构建。
 - Windows：同样检查，另外执行原生逻辑与纯快捷键解析测试。
 
-CI 不启动用户桌面、不安装应用、不自动发布 Release。最终以 GitHub Actions 的实际 run 结果为准，不用本地检查代替远端成功。
+CI 覆盖源码与自动化检查；真实桌面、安装和发布各自单独执行并记录。远端检查状态以 GitHub Actions 的实际结果为准。
 
 ## 界面素材
 
