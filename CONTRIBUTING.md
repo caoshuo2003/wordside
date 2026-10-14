@@ -1,6 +1,8 @@
 # 项目维护与贡献
 
-WordSide 在 [caoshuo2003/wordside](https://github.com/caoshuo2003/wordside) 私有维护。**main 是可发布基线；一个任务、一条短期分支、一个可说明的 PR。** 起步阶段不使用长期 develop 分支。
+WordSide · 词伴的源码已在 [caoshuo2003/wordside](https://github.com/caoshuo2003/wordside) 公开。欢迎通过 Issue 报告问题、讨论想法；代码许可见 [NOTICE](NOTICE.md)。
+
+**main 保存可发布代码；每项改动使用一条短期分支，通过 PR 检查和合并。**
 
 ## 一次改动的流程
 
@@ -50,6 +52,6 @@ JS/TS 修改执行 `npm test` / `npm run check` 的受影响范围；Windows 后
 
 ## 版本与发布
 
-首次 GitHub 基线为 **0.1.0**，不承诺稳定 1.0。修复可用 0.1.1，新功能可用 0.2.0；普通文档提交无需变更应用版本。
+当前版本为 **0.1.0 预发布版**。修复可用 0.1.1，新功能可用 0.2.0；普通文档修改保持应用版本不变。
 
 发布从已检查的 main 创建不可移动的版本标签，流程见 [RELEASING.md](docs/RELEASING.md)。成品放 GitHub Release，不进入源码提交。main 的保护策略按当前账号可用能力配置；无须为单人起步强制要求第二个审查者。
