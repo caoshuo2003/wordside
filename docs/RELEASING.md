@@ -1,6 +1,6 @@
 # 发布流程
 
-首次 GitHub 版本为 **v0.1.0**。源码与成品分开：Git 保存可重建代码，GitHub Release 保存程序、安装包、便携包和许可。
+首次 GitHub 正式版本为 **v0.1.0**。源码与成品分开：Git 保存可重建代码，GitHub Release 保存程序、安装包、便携包和许可。
 
 ## 1 · 准备一个版本
 
@@ -51,12 +51,19 @@ GitHub CLI 已登录且具有仓库发布权限时，可运行：
 
 ```sh
 gh release create v0.1.1 --repo caoshuo2003/wordside \
-  --verify-tag --prerelease \
-  --title "WordSide 0.1.1" --notes-file docs/releases/v0.1.1.md \
+  --verify-tag --latest \
+  --title "WordSide · 词伴 0.1.1" --notes-file docs/releases/v0.1.1.md \
   release/WordSide_0.1.1.exe release/WordSide_0.1.1_x64-setup.exe \
   release/WordSide_0.1.1-portable.zip release/THIRD-PARTY-LICENSES_0.1.1.txt
 ```
 
-发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。预发布阶段保留 `--prerelease` 标记，完整实机验收记录补齐后再评估正式发布。
+发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。正式版使用 `--latest` 作为默认下载版本；提前试用的版本使用 `--prerelease --latest=false`。发布说明如实记录已完成的检查与已知限制。
+
+已有预发布版转正式版时，若程序和版本号保持一致，可沿用同一标签与附件：
+
+```sh
+gh release edit v0.1.0 --repo caoshuo2003/wordside \
+  --prerelease=false --latest --notes-file docs/releases/v0.1.0.md
+```
 
 README 负责介绍和下载，使用指南负责操作，FAQ 负责排查，Release 说明本版变化与已知限制，开发指南负责环境和构建。只更新受本次改动影响的内容，保持链接和版本一致。
