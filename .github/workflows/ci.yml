@@ -58,4 +58,5 @@ jobs:
       - name: Test native dictionary and application logic
         run: ./tools/windows-cargo.ps1 -Action test
       - name: Test default and custom hotkey parsing (no desktop)
-        run: ./tools/windows-cargo.ps1 -Action test -TestFilter capture::shortcut::
+        run: |
+          ./tools/windows-cargo.ps1 -Action test -TestFilter 'capture::shortcut::'
