@@ -6,7 +6,7 @@
 
 ## 安装与第一次查词
 
-WordSide 0.1.0 为 **Windows x64 预发布版**，需要 Microsoft Edge WebView2 和可访问 Cambridge 的网络。取词兼容与安装问题见[常见问题](FAQ.md)。
+WordSide 0.1.0 支持 **Windows x64**，需要 Microsoft Edge WebView2 和可访问 Cambridge 的网络。取词兼容与安装问题见[常见问题](FAQ.md)。
 
 | 方式 | 操作 |
 |---|---|

@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">WordSide · 词伴</h1>
 <p align="center">选中一个词，读懂它。<br>一个安静、紧凑的 Windows 划词词典。</p>
-<p align="center"><strong>0.1.0 预发布版 · Windows x64 · Cambridge Dictionary</strong></p>
+<p align="center"><strong>0.1.0 · Windows x64 · Cambridge Dictionary</strong></p>
 <p align="center">
   <a href="https://github.com/caoshuo2003/wordside/releases/tag/v0.1.0">下载 WordSide</a> ·
   <a href="docs/USER-GUIDE.md">使用指南</a> ·

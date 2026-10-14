@@ -1,6 +1,6 @@
 # WordSide · 词伴桌面端
 
-当前 **0.1.0 预发布版**，Windows x64。TypeScript 提供设置与释义浮窗，Tauri / Rust 在桌面程序内访问 Cambridge。
+当前 **0.1.0 正式版**，Windows x64。TypeScript 提供设置与释义浮窗，Tauri / Rust 在桌面程序内访问 Cambridge。
 
 - 自动划词、可配置快捷键和手动输入。
 - 符号清理、完整词条与候选、简短用户提示。
