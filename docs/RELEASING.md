@@ -21,7 +21,7 @@
 .\tools\windows-cargo.ps1 -Action bundle
 ```
 
-把成品整理到忽略的 `release/`，保留旧版：
+把成品整理到忽略的 `release/v<版本>/`，保留旧版：
 
 ```text
 WordSide_<版本>.exe
@@ -30,7 +30,7 @@ WordSide_<版本>-portable.zip
 THIRD-PARTY-LICENSES_<版本>.txt
 ```
 
-便携包包含主程序、同版许可和使用说明。用 `tools/check-release.ps1` 检查版本与大小，核对 ZIP 清单；发布说明应写清用户可用的功能、运行要求、已知限制和实际验证范围。
+便携包包含主程序、同版许可和使用说明。用 `tools/check-release.ps1 -ReleaseDirectory release/v<版本>` 检查版本与大小，核对 ZIP 清单；发布说明应写清用户可用的功能、运行要求、已知限制和实际验证范围。
 
 ## 3 · 合入与打标签
 
@@ -53,8 +53,8 @@ GitHub CLI 已登录且具有仓库发布权限时，可运行：
 gh release create v0.1.1 --repo caoshuo2003/wordside \
   --verify-tag --latest \
   --title "WordSide · 词伴 0.1.1" --notes-file docs/releases/v0.1.1.md \
-  release/WordSide_0.1.1.exe release/WordSide_0.1.1_x64-setup.exe \
-  release/WordSide_0.1.1-portable.zip release/THIRD-PARTY-LICENSES_0.1.1.txt
+  release/v0.1.1/WordSide_0.1.1.exe release/v0.1.1/WordSide_0.1.1_x64-setup.exe \
+  release/v0.1.1/WordSide_0.1.1-portable.zip release/v0.1.1/THIRD-PARTY-LICENSES_0.1.1.txt
 ```
 
 发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。正式版使用 `--latest` 作为默认下载版本；提前试用的版本使用 `--prerelease --latest=false`。发布说明如实记录已完成的检查与已知限制。

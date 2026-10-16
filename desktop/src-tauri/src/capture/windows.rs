@@ -2,10 +2,11 @@ use super::*;
 use super::policy::{permits_source,copy_chord};
 use super::compatibility::{Capture,Input,Intent,Source,Snapshot,allows_fallback};
 use super::input::{Observer,Kind,Event};
+use super::timing::{Activity,Released};
 use super::windows_text::{TextOrigin,TextRequest,focus_matches};
 use super::{selection::Selection,probe::{Worker,ProbeRequest},hotkey::Driver};
     use crate::{State,hide_popup};
-    use std::{ffi::c_void,sync::{Arc,atomic::{Ordering,AtomicU64}},time::{Duration,Instant}};
+    use std::{sync::{Arc,atomic::{Ordering,AtomicU64},mpsc::{channel,Receiver,TryRecvError}},time::{Duration,Instant}};
     use tauri::{Emitter,Manager,PhysicalPosition};
     type Handle=isize;
     #[derive(Clone,Copy,Default)] #[repr(C)] struct Point{x:i32,y:i32}
@@ -23,50 +24,27 @@ use super::{selection::Selection,probe::{Worker,ProbeRequest},hotkey::Driver};
         fn GetClipboardSequenceNumber()->u32;
         fn GetGUIThreadInfo(thread:u32,info:*mut GuiInfo)->i32;
         fn GetClipboardOwner()->Handle;
-        fn OpenClipboard(window:Handle)->i32;
-        fn CloseClipboard()->i32;
-        fn GetClipboardData(format:u32)->Handle;
         fn GetWindowRect(window:Handle,rect:*mut Rect)->i32;
         fn MonitorFromPoint(point:Point,flags:u32)->Handle;
         fn GetMonitorInfoW(monitor:Handle,info:*mut MonitorInfo)->i32;
         fn ShowWindow(window:Handle,command:i32)->i32;
         fn IsWindowVisible(window:Handle)->i32;
     }
-    #[link(name="kernel32")]
-    extern "system" {
-        fn GlobalLock(handle:Handle)->*const c_void;
-        fn GlobalUnlock(handle:Handle)->i32;
-        fn GlobalSize(handle:Handle)->usize;
-
-    }
     fn pid(window:Handle)->u32{let mut value=0;unsafe{GetWindowThreadProcessId(window,&mut value);}value}
     fn source_process(window:Handle)->Option<u32>{
         let id=pid(window);permits_source(id,std::process::id()).then_some(id)
     }
-    fn clipboard()->Option<String>{
-        unsafe{
-            if OpenClipboard(0)==0{return None;}
-            let handle=GetClipboardData(13);
-            let result=if handle!=0{
-                let size=GlobalSize(handle)/2;
-                let ptr=GlobalLock(handle) as *const u16;
-                if !ptr.is_null(){
-                    let data=std::slice::from_raw_parts(ptr,size.min(4096));
-                    let result=data.iter().position(|v|*v==0).and_then(|len|String::from_utf16(&data[..len]).ok());
-                    GlobalUnlock(handle);result
-                }else{None}
-            }else{None};CloseClipboard();result
-        }
-    }
     fn inside(window:Handle,p:Point)->bool{let mut r=Rect::default();unsafe{GetWindowRect(window,&mut r)!=0&&p.x>=r.left&&p.x<r.right&&p.y>=r.top&&p.y<r.bottom}}
-    fn show(app:&AppHandle,point:Point,serial:u64,manual:bool,expected_epoch:u64,source:Handle,source_pid:u32,focus:Handle,compatibility:Option<Snapshot>,input_guard:Option<(Arc<AtomicU64>,u64)>,payload:serde_json::Value){
-        let handle=app.clone();let _=app.run_on_main_thread(move||{let app=&handle;
+    fn show(app:&AppHandle,point:Point,serial:u64,manual:bool,expected_epoch:u64,source:Handle,source_pid:u32,focus:Handle,compatibility:Option<Snapshot>,input_guard:Option<(Arc<AtomicU64>,u64)>,release:Option<(Activity,u64)>,payload:serde_json::Value)->Receiver<bool>{
+        let(tx,reply)=channel(); let handle=app.clone();let _=app.run_on_main_thread(move||{
+        let consumed=(||{let app=&handle;
         let state=app.state::<State>();
-        if state.capture_epoch.load(Ordering::SeqCst)!=expected_epoch||state.capture_serial.load(Ordering::SeqCst)!=serial||root_window(unsafe{GetForegroundWindow()})!=source||pid(source)!=source_pid{return;}
-        if payload.get("word").is_some()&&!focus_matches(source,focus){return;}
-        if input_guard.as_ref().is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)!=*expected){return;}
-        if compatibility.as_ref().is_some_and(|value|!value.valid_at(unsafe{GetClipboardSequenceNumber()},Instant::now())){return;}
-        if !state.ready.load(Ordering::SeqCst)||(!manual&&!state.enabled.load(Ordering::SeqCst)){return;}
+        if state.capture_epoch.load(Ordering::SeqCst)!=expected_epoch||state.capture_serial.load(Ordering::SeqCst)!=serial||root_window(unsafe{GetForegroundWindow()})!=source||pid(source)!=source_pid{return true;}
+        if payload.get("word").is_some()&&!focus_matches(source,focus){return true;}
+        if input_guard.as_ref().is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)!=*expected){return true;}
+        if compatibility.as_ref().is_some_and(|value|!value.valid_at(unsafe{GetClipboardSequenceNumber()},Instant::now())){return true;}
+        if !state.ready.load(Ordering::SeqCst)||(!manual&&!state.enabled.load(Ordering::SeqCst)){return true;}
+        if !publication_ready(release.as_ref()) || !sampled_released() { return false; }
         if let Some(window)=app.get_webview_window("popup"){
             if !state.pinned.load(Ordering::SeqCst) {
                 let scale=window.monitor_from_point(point.x as f64,point.y as f64).ok().flatten().map(|m|m.scale_factor()).unwrap_or_else(||window.scale_factor().unwrap_or(1.0));
@@ -90,21 +68,36 @@ use super::{selection::Selection,probe::{Worker,ProbeRequest},hotkey::Driver};
             // Win32 explicitly shows the card without activating it or stealing the terminal's focus.
             if let Ok(hwnd)=window.hwnd(){unsafe{ShowWindow(hwnd.0 as isize,4);}}
         }
-        });
+        true})(); let _=tx.send(consumed);
+        }); reply
     }
 
 #[derive(Clone)]
-struct Awaiting { serial: u64, pid: u32, window: Handle, point: Point, epoch: u64, manual: bool, focus: Handle, origin: TextOrigin, pointer_retry: bool, failure: Option<Selection>, guard: Option<(Arc<AtomicU64>,u64)> }
+struct Awaiting { serial: u64, pid: u32, window: Handle, point: Point, epoch: u64, manual: bool, focus: Handle, origin: TextOrigin, pointer_retry: bool, failure: Option<Selection>, submitted: bool, queued_at: Instant, release: Option<Activity>, guard: Option<(Arc<AtomicU64>,u64)> }
 impl Awaiting {
-    fn automatic(serial: u64, epoch: u64, intent: Intent, guard: Option<(Arc<AtomicU64>,u64)>) -> Self {
+    fn automatic(serial: u64, epoch: u64, intent: Intent, guard: Option<(Arc<AtomicU64>,u64)>, release: Option<Activity>) -> Self {
         // Automatic and manual lookup must first ask the same focused control.
         Self { serial, pid: intent.source.pid, window: intent.source.window, point: Point { x: intent.x, y: intent.y }, epoch,
-            manual: false, focus: intent.source.focus, origin: TextOrigin::Focused, pointer_retry: intent.pointer, failure: None, guard }
+            manual: false, focus: intent.source.focus, origin: TextOrigin::Focused, pointer_retry: intent.pointer, failure: None, submitted: false, queued_at: Instant::now(), release, guard }
     }
 }
-struct Candidate { window: Handle, pid: u32, point: Point, word: String, epoch: u64, manual: bool, focus: Handle, after: Instant, compatibility: Option<Snapshot>, guard: Option<(Arc<AtomicU64>,u64)> }
+struct Candidate { window: Handle, pid: u32, point: Point, selection: Selection, publication: Option<Receiver<bool>>, release: Option<Activity>, epoch: u64, manual: bool, focus: Handle, after: Instant, compatibility: Option<Snapshot>, guard: Option<(Arc<AtomicU64>,u64)> }
+fn publication_consumed(value:&mut Candidate)->bool {
+    match value.publication.as_ref().map(|reply|reply.try_recv()) {
+        Some(Ok(true)|Err(TryRecvError::Disconnected))=>true,
+        Some(Ok(false))=>{value.publication=None; false},
+        _=>false,
+    }
+}
 fn root_window(window: Handle) -> Handle { let root = unsafe { GetAncestor(window, 2) }; if root != 0 { root } else { window } }
 fn pressed(key: i32) -> bool { unsafe { GetAsyncKeyState(key) < 0 } }
+fn sampled_released()->bool { !(1..256).any(pressed) }
+fn release_stamp(observer:Option<&Observer>)->Option<u64> {
+    observer.map(|observer|observer.activity().stamp()).unwrap_or_else(||sampled_released().then_some(0))
+}
+fn publication_ready(release:Option<&(Activity,u64)>)->bool {
+    release.map(|(activity,stamp)|activity.stamp()==Some(*stamp)).unwrap_or_else(sampled_released)
+}
 fn current_source(window: Handle) -> Source {
     let pid = source_process(window).unwrap_or(0);
     let thread = unsafe { GetWindowThreadProcessId(window, std::ptr::null_mut()) };
@@ -124,7 +117,11 @@ fn invalidate(worker: &Worker, state: &State, serial: u64) { state.capture_seria
 fn probe_request(value: &Awaiting) -> ProbeRequest {
     ProbeRequest { serial: value.serial, text: TextRequest { pid: value.pid, window: value.window, origin: value.origin, focus: value.focus } }
 }
-fn request(worker: &Worker, value: &Awaiting) { worker.submit(probe_request(value)); }
+fn request(worker: &Worker, value: &mut Awaiting) { worker.submit_verified(probe_request(value), value.guard.clone(),value.release.clone()); value.submitted=true; }
+fn same_manual(value:&Awaiting, source:Source, epoch:u64)->bool { value.manual && operation_valid(value,source,epoch,false,false) }
+fn candidate(value:Awaiting, selection:Selection, now:Instant, compatibility:Option<Snapshot>)->Candidate {
+    Candidate {window:value.window,pid:value.pid,point:value.point,selection,publication:None,release:value.release,epoch:value.epoch,manual:value.manual,focus:value.focus,after:now,compatibility,guard:value.guard}
+}
 fn sampled_press_invalidates(observed_events: bool, down: bool, was_down: bool) -> bool { !observed_events && down && !was_down }
 fn reject_failure(failure: &Selection, capture: &mut Capture) {
     // A failed provider cannot authorize this attempt's clipboard fallback. It
@@ -132,16 +129,39 @@ fn reject_failure(failure: &Selection, capture: &mut Capture) {
     // focused read may confirm. Protection/invalid text invalidate both paths.
     if matches!(failure, Selection::Protected | Selection::InvalidWord) { capture.clear(); }
 }
+fn operation_source_valid(value: &Awaiting, source: Source, epoch: u64, enabled: bool) -> bool {
+    source.window==value.window && source.pid==value.pid && epoch==value.epoch && (value.manual||enabled)
+        && !value.guard.as_ref().is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)!=*expected)
+}
 fn operation_valid(value: &Awaiting, source: Source, epoch: u64, enabled: bool, _pinned: bool) -> bool {
-    source.window == value.window && source.pid == value.pid && (value.focus == 0 || source.focus == value.focus)
-        && epoch == value.epoch && (value.manual || enabled)
-        && !value.guard.as_ref().is_some_and(|(generation, expected)| generation.load(Ordering::SeqCst) != *expected)
+    operation_source_valid(value,source,epoch,enabled)
+        && (value.manual && !value.submitted || value.focus==0 || source.focus==value.focus)
+}
+fn focus_failure(mut value: Awaiting, source: Source, epoch: u64, enabled: bool, serial: u64, now: Instant) -> Option<Candidate> {
+    // A same-window programmatic focus change must reject the word, but need
+    // not swallow a manual request. Only a real, unchanged input guard grants
+    // this source-bound failure card; never use fallback or resubmit the copy.
+    if !value.manual || !value.submitted || value.guard.is_none() || value.focus==source.focus
+        || !operation_source_valid(&value,source,epoch,enabled) {return None;}
+    value.serial=serial;value.focus=0;
+    Some(candidate(value,Selection::SourceMismatch,now,None))
+}
+fn selection_requires_focus(selection: &Selection) -> bool {matches!(selection,Selection::Word(_))}
+enum Preparation { Ready, Wait, Failed }
+fn prepare_focus(value: &mut Awaiting, source: Source, now: Instant) -> Preparation {
+    if !value.manual || value.submitted { return Preparation::Ready; }
+    // WM_HOTKEY arrives before its modifiers are released. Menu/child focus can
+    // settle during that release. Bind it once now, not at the keydown snapshot.
+    if source.focus != 0 { value.focus=source.focus; return Preparation::Ready; }
+    if now.saturating_duration_since(value.queued_at) < Duration::from_millis(750) { return Preparation::Wait; }
+    // An unavailable focus must not become a wildcard authorizing a copy.
+    // A source-bound failure card can still explain the failed request.
+    value.focus=0; Preparation::Failed
 }
 enum Resolution { Ready(Candidate), Wait(Awaiting), Retry(Awaiting), Failed(Awaiting, Selection) }
 fn finish_probe(mut value: Awaiting, selection: Selection, capture: &mut Capture, observed_events: bool, now: Instant) -> Resolution {
     match selection {
-        Selection::Word(word) => Resolution::Ready(Candidate { window: value.window, pid: value.pid, point: value.point, word, epoch: value.epoch,
-            manual: value.manual, focus: value.focus, after: now + Duration::from_millis(if value.manual { 0 } else { 40 }), compatibility: None, guard: value.guard }),
+        Selection::Word(word) => Resolution::Ready(candidate(value,Selection::Word(word),now,None)),
         failure => {
             reject_failure(&failure, capture);
             if allows_fallback(&failure) && (!value.manual || observed_events) {
@@ -159,27 +179,21 @@ fn resolve_deferred(mut value: Awaiting, capture: &Capture, sequence: u32, now: 
     // rather than the focused control. Try it once, only after the original copy
     // window ends without a usable word. Never replace a valid Pebrel selection.
     if !value.manual && value.pointer_retry && matches!(value.origin, TextOrigin::Focused) {
-        value.pointer_retry = false; value.origin = TextOrigin::Pointer(value.point.x, value.point.y); return Resolution::Retry(value);
+        value.pointer_retry = false; value.origin = TextOrigin::Pointer(value.point.x, value.point.y); value.submitted=false; return Resolution::Retry(value);
     }
     Resolution::Failed(value, failure)
 }
-fn apply_resolution(resolution: Resolution, app: &AppHandle, worker: &Worker, awaiting: &mut Option<Awaiting>, candidate: &mut Option<Candidate>, source: &mut Handle) {
+fn apply_resolution(resolution: Resolution, awaiting: &mut Option<Awaiting>, pending: &mut Option<Candidate>) {
     match resolution {
-        Resolution::Ready(value) => *candidate = Some(value),
-        Resolution::Wait(value) => *awaiting = Some(value),
-        Resolution::Retry(value) => { request(worker, &value); *awaiting = Some(value); }
-        Resolution::Failed(value, failure) => {
-            *candidate = None;
-            if value.manual { if let Some((code, message)) = failure.failure() {
-                *source = value.window;
-                show(app, value.point, value.serial, true, value.epoch, value.window, value.pid, value.focus, None, value.guard, serde_json::json!({"code":code,"message":message}));
-            } }
+        Resolution::Ready(value) => *pending=Some(value),
+        Resolution::Wait(value)|Resolution::Retry(value) => *awaiting=Some(value),
+        Resolution::Failed(value,failure) => {
+            *pending=if value.manual {Some(candidate(value,failure,Instant::now(),None))} else {None};
         }
     }
 }
-fn compatible(value: &Awaiting, snapshot: Snapshot, now: Instant) -> Candidate {
-    Candidate { window: value.window, pid: value.pid, point: value.point, word: snapshot.word.clone(), epoch: value.epoch,
-        manual: value.manual, focus: value.focus, after: now + Duration::from_millis(if value.manual { 0 } else { 40 }), compatibility: Some(snapshot), guard: value.guard.clone() }
+fn compatible(value:&Awaiting, snapshot:Snapshot, now:Instant)->Candidate {
+    candidate(value.clone(),Selection::Word(snapshot.word.clone()),now,Some(snapshot))
 }
 
 pub fn run(app: AppHandle) {
@@ -191,9 +205,10 @@ pub fn run(app: AppHandle) {
         Ok(value) => Some(value),
         Err(message) => { let _ = app.emit_to("main", "native-capture-feedback", serde_json::json!({"code":"capture_unavailable","message":message})); None }
     };
-    let (worker, answers) = Worker::new(); let mut capture = Capture::default();
-    let mut capture_generation = 0;
+    let (worker, answers) = Worker::new(app.state::<State>().config.with_file_name("capture-status.json")); let mut capture = Capture::default();
+    let mut capture_generation = 0; let mut released=Released::default();
     let mut candidate: Option<Candidate> = None; let mut awaiting: Option<Awaiting> = None;
+    let mut observation: Option<(u64,Source,u64)> = None; let mut observed_attempt: Option<(Source,u32,u64)> = None;
     let mut serial = 0u64; let mut was_down = false; let mut was_copy = false;
     let mut previous_sequence = unsafe { GetClipboardSequenceNumber() }; let mut source = 0;
     let mut dismissal = crate::dismissal::Dismissal::default();
@@ -204,13 +219,13 @@ pub fn run(app: AppHandle) {
         let enabled = state.enabled.load(Ordering::SeqCst); let visible = unsafe { IsWindowVisible(popup_hwnd) != 0 };
         Driver::wait(poll_interval(enabled, visible || awaiting.is_some() || candidate.is_some() || capture.recent.pending()));
         let shortcuts = keys.drain();
-        if let Some(observer) = observer.as_ref() { observer.set_shortcut(keys.input_signature()); }
+        if let Some(observer) = observer.as_ref() { observer.set_shortcut(keys.input_signature()); observer.refresh(); }
         let (lost, mut inputs) = observer.as_ref().map(Observer::drain).unwrap_or_default();
         let down = pressed(1); let copy = copy_chord(pressed(0x11), pressed(0x43), pressed(0x2D), pressed(0x12), pressed(0x5B) || pressed(0x5C));
-        let sequence = unsafe { GetClipboardSequenceNumber() }; let foreground = root_window(unsafe { GetForegroundWindow() });
+        let foreground = root_window(unsafe { GetForegroundWindow() });
         let context = current_source(foreground); let mut point = Point::default(); unsafe { GetCursorPos(&mut point); }
         let state = app.state::<State>(); let enabled = state.enabled.load(Ordering::SeqCst); let pinned = state.pinned.load(Ordering::SeqCst);
-        let now = Instant::now(); let mut epoch = state.capture_epoch.load(Ordering::SeqCst);
+        let now = Instant::now(); let input_stamp=release_stamp(observer.as_ref()); let idle=released.ready(input_stamp,now); let mut epoch = state.capture_epoch.load(Ordering::SeqCst);
         if epoch != observed_epoch {
             serial = serial.wrapping_add(1); invalidate(&worker, &state, serial); capture.clear(); awaiting = None; candidate = None; observed_epoch = epoch;
         }
@@ -259,33 +274,51 @@ pub fn run(app: AppHandle) {
                 awaiting = None; candidate = None;
             }
             if let Some(intent) = effect.lookup {
-                begin(&app, serial, false, epoch);
-                let value = Awaiting::automatic(serial, epoch, intent, observer.as_ref().map(|observer| (observer.guard().0, capture_generation)));
-                request(&worker, &value); awaiting = Some(value);
+                let value = Awaiting::automatic(serial, epoch, intent, observer.as_ref().map(|observer| (observer.guard().0, capture_generation)),observer.as_ref().map(Observer::activity));
+                awaiting = Some(value);
             }
         }
         if observer.as_ref().is_some_and(|value|value.generation()!=capture_generation) { capture.clear(); }
-        capture.recent.observe(context, sequence, now);
-        // A new selection's clipboard may arrive after its mouse-up or hotkey.
-        // Only that preexisting bounded gesture grants permission to read it.
-        if capture.recent.wants_clipboard(context, sequence, now) {
-            let owner = unsafe { GetClipboardOwner() };
-            let owner_matches = owner == 0 || pid(owner) == context.pid || root_window(owner) == context.window;
-            if !owner_matches { capture.recent.clear(); }
-            else if let Some(raw) = clipboard() {
-                let read_at = Instant::now();
-                if unsafe { GetClipboardSequenceNumber() } != sequence || root_window(unsafe { GetForegroundWindow() }) != foreground || current_source(foreground) != context {
-                    capture.recent.clear();
-                } else { capture.recent.accept(context, sequence, true, &raw, read_at); }
+        // The coordinator must never call GetClipboardData: delayed rendering
+        // can block it even though the input hooks have their own thread.
+        for reply in worker.observed() {
+            if !observation.as_ref().is_some_and(|(token,_,_)|*token==reply.serial) {continue;}
+            let(_,observed_source,generation)=observation.take().unwrap();
+            let unchanged=observer.as_ref().is_none_or(|observer|observer.generation()==generation);
+            if observed_source==context && unchanged {
+                if let (Selection::Word(word),Some(sequence))=(reply.selection,reply.clipboard_sequence) {
+                    if unsafe{GetClipboardSequenceNumber()}==sequence {
+                        capture.recent.accept(context,sequence,true,&word,Instant::now());
+                    }
+                }
+            }
+        }
+        let sequence=unsafe{GetClipboardSequenceNumber()}; let observed_at=Instant::now();
+        capture.recent.observe(context,sequence,observed_at);
+        let generation=observer.as_ref().map(Observer::generation).unwrap_or(0);
+        let wants=capture.recent.wants_clipboard(context,sequence,observed_at);
+        if observation.as_ref().is_some_and(|(_,source,expected)|!wants || *source!=context || *expected!=generation) {
+            worker.cancel_observed(observation.take().unwrap().0);
+        }
+        if wants && observation.is_none() && observed_attempt!=Some((context,sequence,generation)) {
+            let owner=unsafe{GetClipboardOwner()};
+            if owner!=0 && pid(owner)!=context.pid && root_window(owner)!=context.window {capture.recent.clear();}
+            else {
+                let text=TextRequest{pid:context.pid,window:context.window,focus:context.focus,origin:TextOrigin::ObservedClipboard(sequence)};
+                let deadline=capture.recent.clipboard_deadline(context,sequence,observed_at).expect("fresh gesture has its original deadline");
+                let token=worker.observe_clipboard(text,observer.as_ref().map(Observer::guard),deadline);
+                observation=Some((token,context,generation)); observed_attempt=Some((context,sequence,generation));
             }
         }
         for event in shortcuts {
+            if awaiting.as_ref().is_some_and(|value|same_manual(value,context,epoch))
+                || candidate.as_ref().is_some_and(|value|value.manual && value.window==context.window && value.pid==context.pid && value.focus==context.focus
+                    && value.epoch==epoch && !value.guard.as_ref().is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)!=*expected)) { continue; }
             serial = serial.wrapping_add(1); invalidate(&worker, &state, serial); capture.manual(); awaiting = None; candidate = None;
             let window = root_window(event.window); if window != foreground { continue; }
             if let Some(id) = source_process(window) {
-                begin(&app, serial, true, epoch);
-                let value = Awaiting { serial, pid: id, window, point: Point { x: event.x, y: event.y }, epoch, manual: true, focus: event.focus, origin: TextOrigin::Focused, pointer_retry: false, failure: None, guard: observer.as_ref().map(Observer::guard) };
-                request(&worker, &value); awaiting = Some(value);
+                let value = Awaiting { serial, pid: id, window, point: Point { x: event.x, y: event.y }, epoch, manual: true, focus: event.focus, origin: TextOrigin::Focused, pointer_retry: false, failure: None, submitted:false, queued_at: now, release:observer.as_ref().map(Observer::activity), guard: observer.as_ref().map(Observer::guard) };
+                awaiting = Some(value);
             } else {
                 let _ = app.emit_to("main", "native-capture-feedback", serde_json::json!({"code":"select_first","message":"请先在其他应用中选中文字，再按主动查词快捷键。"}));
             }
@@ -293,27 +326,60 @@ pub fn run(app: AppHandle) {
         while let Ok(result) = answers.try_recv() {
             if result.serial != serial { continue; }
             if let Some(value) = awaiting.take() {
-                if result.serial != value.serial || !operation_valid(&value, context, epoch, enabled, pinned) { continue; }
+                if result.serial != value.serial {continue;}
+                let latest=current_source(root_window(unsafe{GetForegroundWindow()}));
+                if !operation_valid(&value,latest,epoch,enabled,pinned) {
+                    serial=serial.wrapping_add(1);invalidate(&worker,&state,serial);
+                    candidate=focus_failure(value,latest,epoch,enabled,serial,now);
+                    if let Some(value)=candidate.as_ref(){begin(&app,serial,true,value.epoch);}
+                    continue;
+                }
                 let resolution = finish_probe(value, result.selection, &mut capture, observer.is_some(), now);
-                apply_resolution(resolution, &app, &worker, &mut awaiting, &mut candidate, &mut source);
+                apply_resolution(resolution, &mut awaiting, &mut candidate);
             }
         }
-        if awaiting.as_ref().is_some_and(|v| !operation_valid(v, context, epoch, enabled, pinned) || !focus_matches(v.window, v.focus) || sampled_press_invalidates(observer.is_some(), down, was_down)) {
-            serial = serial.wrapping_add(1); invalidate(&worker, &state, serial); awaiting = None; candidate = None; capture.clear();
+        if awaiting.is_some() {
+            // Decide cancellation and its feedback from one fresh snapshot. A
+            // child focus may already have returned since this loop's context.
+            let latest=current_source(root_window(unsafe{GetForegroundWindow()}));
+            if awaiting.as_ref().is_some_and(|v| !operation_valid(v,latest,epoch,enabled,pinned) || sampled_press_invalidates(observer.is_some(),down,was_down)) {
+                let value=awaiting.take().unwrap();
+                serial=serial.wrapping_add(1);invalidate(&worker,&state,serial);capture.clear();
+                candidate=focus_failure(value,latest,epoch,enabled,serial,now);
+                if let Some(value)=candidate.as_ref(){begin(&app,serial,true,value.epoch);}
+            }
         }
+        if !idle && awaiting.as_ref().is_some_and(|value|!value.manual && value.submitted && value.failure.is_none()) {
+            serial=serial.wrapping_add(1); invalidate(&worker,&state,serial);
+            if let Some(value)=awaiting.as_mut(){value.serial=serial;value.submitted=false;}
+        }
+        if idle && release_stamp(observer.as_ref())==input_stamp { if let Some(value)=awaiting.as_mut() { if !value.submitted && value.failure.is_none() {
+            match prepare_focus(value,context,Instant::now()) {
+                Preparation::Ready=>{begin(&app,value.serial,value.manual,value.epoch); request(&worker,value);},
+                Preparation::Wait=>{},
+                Preparation::Failed=>{begin(&app,value.serial,value.manual,value.epoch); value.failure=Some(Selection::SourceMismatch);},
+            }
+        } } }
         if awaiting.as_ref().is_some_and(|v| v.failure.is_some()) {
-            let resolution = resolve_deferred(awaiting.take().unwrap(), &capture, sequence, Instant::now());
-            apply_resolution(resolution, &app, &worker, &mut awaiting, &mut candidate, &mut source);
+            let resolution = resolve_deferred(awaiting.take().unwrap(), &capture, unsafe{GetClipboardSequenceNumber()}, Instant::now());
+            apply_resolution(resolution, &mut awaiting, &mut candidate);
         }
-        if let Some(value) = candidate.as_ref() {
+        if let Some(value) = candidate.as_mut() {
             let selection_source = Source { window: value.window, pid: value.pid, focus: value.focus };
             let expired = value.compatibility.as_ref().is_some_and(|v| !capture.recent.current(v.revision, selection_source, unsafe { GetClipboardSequenceNumber() }, Instant::now()));
             let input_changed = value.guard.as_ref().is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)!=*expected);
             if foreground != value.window || pid(foreground) != value.pid || state.capture_epoch.load(Ordering::SeqCst) != value.epoch
-                || !focus_matches(value.window, value.focus) || (!value.manual && !enabled) || expired || input_changed { candidate = None; }
-            else if !down && Instant::now() >= value.after && awaiting.is_none() {
-                let value = candidate.take().unwrap(); source = value.window;
-                show(&app, value.point, serial, value.manual, value.epoch, value.window, value.pid, value.focus, value.compatibility, value.guard, serde_json::json!({"word":value.word}));
+                || (selection_requires_focus(&value.selection) && !focus_matches(value.window, value.focus)) || (!value.manual && !enabled) || expired || input_changed { candidate = None; }
+            else if publication_consumed(value) { candidate=None; }
+            else {
+                if idle && release_stamp(observer.as_ref())==input_stamp && Instant::now()>=value.after && awaiting.is_none() && value.publication.is_none() {
+                    source=value.window;
+                    let payload=match &value.selection { Selection::Word(word)=>serde_json::json!({"word":word}), failure=>{
+                        let(code,message)=failure.failure().expect("failed capture has a user message"); serde_json::json!({"code":code,"message":message})
+                    }};
+                    let release=value.release.as_ref().and_then(|activity|input_stamp.map(|stamp|(activity.clone(),stamp)));
+                    value.publication=Some(show(&app,value.point,serial,value.manual,value.epoch,value.window,value.pid,value.focus,value.compatibility.clone(),value.guard.clone(),release,payload));
+                }
             }
         }
         was_down = down; was_copy = copy; previous_sequence = sequence;
@@ -324,20 +390,106 @@ pub fn run(app: AppHandle) {
 mod tests {
     use super::*;
     fn source() -> Source { Source { window: 20, pid: 200, focus: 21 } }
-    fn operation() -> Awaiting { Awaiting::automatic(1, 1, Intent { source: source(), x: 40, y: 10, pointer: true }, None) }
+    fn operation() -> Awaiting { Awaiting::automatic(1, 1, Intent { source: source(), x: 40, y: 10, pointer: true }, None, None) }
     fn selected(capture: &mut Capture, now: Instant) {
         capture.recent.begin(source(), 7, now); assert!(capture.recent.accept(source(), 8, true, "terminal", now));
     }
     fn drag(capture: &mut Capture, now: Instant, automatic: bool) -> Option<Awaiting> {
         capture.input(Input::Down { window: 20, x: 10, y: 10, sequence: 7, shift: false, at: now }, source(), automatic, Duration::from_millis(500));
         capture.input(Input::Up { window: 20, x: 40, y: 10, at: now + Duration::from_millis(10) }, source(), automatic, Duration::from_millis(500))
-            .lookup.map(|intent| Awaiting::automatic(1, 1, intent, None))
+            .lookup.map(|intent| Awaiting::automatic(1, 1, intent, None, None))
     }
     fn deferred(resolution: Resolution) -> Awaiting {
         match resolution { Resolution::Wait(value) => value, _ => panic!("the completed read should await only its authorized selection") }
     }
     fn ready(resolution: Resolution) -> Candidate {
         match resolution { Resolution::Ready(value) => value, _ => panic!("the authorized word should be ready exactly once") }
+    }
+    #[test] fn submitted_manual_focus_change_rejects_the_word_but_keeps_one_failure_card() {
+        let mut value=operation();value.manual=true;value.submitted=true;
+        value.guard=Some((Arc::new(AtomicU64::new(10)),10));
+        let result=focus_failure(value,Source{focus:22,..source()},1,false,2,Instant::now()).unwrap();
+        assert_eq!(result.selection,Selection::SourceMismatch);assert_eq!(result.focus,0);
+        assert!(result.compatibility.is_none());assert!(result.manual);
+        assert!(!selection_requires_focus(&result.selection),"a failure may explain the rejected query in the same source window");
+        assert!(selection_requires_focus(&Selection::Word("never_display_this_old_word".into())));
+    }
+    #[test] fn manual_focus_return_before_cancellation_preserves_the_submitted_request() {
+        let mut value=operation();value.manual=true;value.submitted=true;
+        value.guard=Some((Arc::new(AtomicU64::new(10)),10));
+        let earlier=Source{focus:22,..source()};
+        assert!(!operation_valid(&value,earlier,1,false,false));
+        let latest=source();
+        assert!(operation_valid(&value,latest,1,false,false),"use the fresh source before canceling, not the earlier loop snapshot");
+        assert!(focus_failure(value,latest,1,false,2,Instant::now()).is_none());
+    }
+    #[test] fn focus_failure_never_survives_new_input_other_source_or_absent_observer() {
+        let mut value=operation();value.manual=true;value.submitted=true;
+        let generation=Arc::new(AtomicU64::new(10));value.guard=Some((generation.clone(),10));
+        let changed=Source{focus:22,..source()};let now=Instant::now();
+        for context in [Source{window:30,..changed},Source{pid:300,..changed},source()] {
+            assert!(focus_failure(value.clone(),context,1,false,2,now).is_none());
+        }
+        assert!(focus_failure(value.clone(),changed,2,false,2,now).is_none());
+        generation.store(11,Ordering::SeqCst);assert!(focus_failure(value.clone(),changed,1,false,2,now).is_none());
+        value.guard=None;assert!(focus_failure(value.clone(),changed,1,false,2,now).is_none());
+        value.manual=false;assert!(focus_failure(value,changed,1,true,2,now).is_none());
+    }
+    #[test] fn queued_manual_survives_same_window_focus_transition_until_release() {
+        let mut value=operation(); value.manual=true; value.submitted=false;
+        assert!(operation_valid(&value,Source{focus:22,..source()},1,false,false),
+            "a hotkey queued while Alt is held must not be silently lost before release");
+        assert!(operation_valid(&value,Source{focus:0,..source()},1,false,false),
+            "a transient unavailable focus must wait instead of consuming the one press");
+        value.submitted=true;
+        assert!(!operation_valid(&value,Source{focus:22,..source()},1,false,false),
+            "once submitted, a changed control must still invalidate the result");
+    }
+    #[test] fn manual_focus_is_bound_once_at_submission_and_unknown_focus_has_a_deadline() {
+        let mut value=operation(); value.manual=true; let at=value.queued_at;
+        assert!(matches!(prepare_focus(&mut value,Source{focus:0,..source()},at),Preparation::Wait));
+        assert!(matches!(prepare_focus(&mut value,Source{focus:22,..source()},at+Duration::from_millis(80)),Preparation::Ready));
+        assert_eq!(probe_request(&value).text.focus,22);
+        value.submitted=true;
+        assert!(!operation_valid(&value,source(),1,false,false));
+        assert!(operation_valid(&value,Source{focus:22,..source()},1,false,false));
+        for changed in [Source{window:30,..source()},Source{pid:300,..source()}] {
+            value.submitted=false;
+            assert!(!operation_valid(&value,changed,1,false,false));
+        }
+        value.submitted=false;
+        assert!(matches!(prepare_focus(&mut value,Source{focus:0,..source()},at+Duration::from_millis(751)),Preparation::Failed));
+        assert_eq!(value.focus,0);
+    }
+    #[test] fn one_hotkey_queues_until_all_keys_are_released_and_does_not_restart_on_a_second_press() {
+        let activity=Activity::default(); let mut manual=operation(); manual.manual=true; manual.release=Some(activity.clone());
+        let mut gate=Released::default(); let now=Instant::now();
+        activity.changed(true); assert!(!gate.ready(activity.stamp(),now));
+        assert!(!manual.submitted); assert!(same_manual(&manual,source(),1));
+        activity.changed(false); assert!(!gate.ready(activity.stamp(),now+Duration::from_millis(100)));
+        assert!(gate.ready(activity.stamp(),now+Duration::from_millis(140)));
+        let mut capture=Capture::default(); let candidate=ready(finish_probe(manual.clone(),Selection::Word("runtime".into()),&mut capture,true,now));
+        assert!(candidate.manual); assert_eq!(candidate.selection,Selection::Word("runtime".into()));
+        manual.submitted=true; assert!(!same_manual(&manual,Source{focus:22,..source()},1)); assert!(!same_manual(&manual,source(),2));
+    }
+    #[test] fn failure_and_success_use_the_same_release_checked_publication_path() {
+        for selection in [Selection::Word("runtime".into()),Selection::ClipboardUnavailable,Selection::SourceMismatch] {
+            let activity=Activity::default(); let mut manual=operation(); manual.manual=true; manual.release=Some(activity.clone());
+            let mut capture=Capture::default(); let now=Instant::now(); let mut awaiting=None; let mut pending=None;
+            apply_resolution(finish_probe(manual,selection.clone(),&mut capture,true,now),&mut awaiting,&mut pending);
+            let candidate=pending.unwrap(); assert_eq!(candidate.selection,selection);
+            let stamp=activity.stamp().unwrap(); assert!(publication_ready(Some(&(activity.clone(),stamp))));
+            activity.changed(true); assert!(!publication_ready(Some(&(activity.clone(),stamp))));
+            activity.changed(false); assert!(!publication_ready(Some(&(activity.clone(),stamp))),"a release after main-thread queuing must defer, not publish with an old fence");
+        }
+    }
+    #[test] fn main_thread_deferral_keeps_the_candidate_for_a_later_publication() {
+        let mut value=candidate(operation(),Selection::Word("runtime".into()),Instant::now(),None);
+        let(tx,reply)=channel(); value.publication=Some(reply);
+        assert!(!publication_consumed(&mut value)); tx.send(false).unwrap();
+        assert!(!publication_consumed(&mut value)); assert!(value.publication.is_none());
+        let(tx,reply)=channel(); value.publication=Some(reply); tx.send(true).unwrap();
+        assert!(publication_consumed(&mut value));
     }
     #[test] fn api6_regression_automatic_provider_failure_keeps_fresh_selection_for_manual() {
         let now = Instant::now(); let mut capture = Capture::default(); selected(&mut capture, now);
@@ -347,7 +499,7 @@ mod tests {
         // focused read reports Unsupported, exactly as it does with automatic OFF.
         let value = deferred(finish_probe(manual, Selection::Unsupported, &mut capture, true, now));
         let result = ready(resolve_deferred(value, &capture, 8, now));
-        assert!(result.manual); assert_eq!(result.word, "terminal");
+        assert!(result.manual); assert_eq!(result.selection, Selection::Word("terminal".into()));
     }
     #[test] fn api6_regression_mouse_up_event_does_not_cancel_selection_using_old_button_sample() {
         let now = Instant::now(); let mut capture = Capture::default(); let value = drag(&mut capture, now, true).unwrap();
@@ -355,7 +507,7 @@ mod tests {
         if sampled_press_invalidates(true, true, false) { capture.clear(); }
         assert!(capture.recent.accept(source(), 8, true, "terminal", now + Duration::from_millis(15)), "a recorded up must not be mistaken for a new down");
         let value = deferred(finish_probe(value, Selection::Unsupported, &mut capture, true, now));
-        assert_eq!(ready(resolve_deferred(value, &capture, 8, now)).word, "terminal");
+        assert_eq!(ready(resolve_deferred(value, &capture, 8, now)).selection, Selection::Word("terminal".into()));
         assert!(!sampled_press_invalidates(true, true, false));
         assert!(sampled_press_invalidates(false, true, false), "sampled mode still cancels on a new press");
     }
@@ -383,7 +535,7 @@ mod tests {
                 assert!(capture.recent.accept(source(), 8, true, "terminal", now + Duration::from_millis(25))); value
             } else { value };
             let result = ready(resolve_deferred(value, &capture, 8, now + Duration::from_millis(30)));
-            assert!(!result.manual); assert_eq!(result.word, "terminal"); assert_eq!(result.focus, 21);
+            assert!(!result.manual); assert_eq!(result.selection, Selection::Word("terminal".into())); assert_eq!(result.focus, 21);
             assert_eq!(result.compatibility.unwrap().sequence, 8);
         } }
     }
@@ -395,7 +547,7 @@ mod tests {
             if !copied { assert!(capture.recent.accept(source(), 8, true, "terminal", now + Duration::from_millis(25))); }
             capture.manual(); let mut manual = operation(); manual.manual = true; manual.pointer_retry = false;
             let value = deferred(finish_probe(manual, Selection::Unsupported, &mut capture, true, now));
-            assert_eq!(ready(resolve_deferred(value, &capture, 8, now + Duration::from_millis(30))).word, "terminal");
+            assert_eq!(ready(resolve_deferred(value, &capture, 8, now + Duration::from_millis(30))).selection, Selection::Word("terminal".into()));
         } }
     }
     #[test] fn api6_protected_or_invalid_selection_clears_both_capture_paths_before_or_after_copy() {
@@ -417,9 +569,9 @@ mod tests {
         let value = deferred(finish_probe(value, Selection::Unsupported, &mut capture, true, end));
         assert!(matches!(resolve_deferred(value, &capture, 7, end), Resolution::Failed(_, Selection::Unsupported)), "do not resubmit in a loop");
         selected(&mut capture, now); let value = deferred(finish_probe(operation(), Selection::Unsupported, &mut capture, true, now));
-        assert_eq!(ready(resolve_deferred(value, &capture, 8, now)).word, "terminal", "a captured Pebrel word must not cause a second point request");
+        assert_eq!(ready(resolve_deferred(value, &capture, 8, now)).selection, Selection::Word("terminal".into()), "a captured Pebrel word must not cause a second point request");
         let value = deferred(finish_probe(operation(), Selection::NoSelection, &mut capture, true, now));
-        assert_eq!(ready(resolve_deferred(value, &capture, 8, now)).word, "terminal");
+        assert_eq!(ready(resolve_deferred(value, &capture, 8, now)).selection, Selection::Word("terminal".into()));
     }
     #[test] fn api6_manual_off_remains_independent_and_does_not_retry_pointer_or_sampled_clipboard() {
         let now = Instant::now(); let mut capture = Capture::default(); assert!(drag(&mut capture, now, false).is_none());
@@ -427,7 +579,7 @@ mod tests {
         let mut manual = operation(); manual.manual = true; manual.pointer_retry = false;
         assert!(operation_valid(&manual, source(), 1, false, false));
         let value = deferred(finish_probe(manual.clone(), Selection::Unsupported, &mut capture, true, now));
-        let result = ready(resolve_deferred(value, &capture, 8, now)); assert!(result.manual); assert_eq!(result.word, "runtime");
+        let result = ready(resolve_deferred(value, &capture, 8, now)); assert!(result.manual); assert_eq!(result.selection, Selection::Word("runtime".into()));
         assert!(matches!(finish_probe(manual.clone(), Selection::Unsupported, &mut capture, false, now), Resolution::Failed(_, _)), "without actual input observation, OFF/manual never trusts sampled history");
         capture.clear(); let value = deferred(finish_probe(manual, Selection::Unsupported, &mut capture, true, now));
         assert!(matches!(resolve_deferred(value, &capture, 8, now), Resolution::Failed(_, _)), "manual lookup has no point fallback");
@@ -435,11 +587,11 @@ mod tests {
     #[test] fn api6_direct_words_win_and_late_copy_does_not_generate_a_second_result() {
         let now = Instant::now(); let mut capture = Capture::default(); let value = drag(&mut capture, now, true).unwrap();
         let result = ready(finish_probe(value, Selection::Word("runtime".into()), &mut capture, true, now));
-        assert_eq!(result.word, "runtime"); assert!(result.compatibility.is_none());
+        assert_eq!(result.selection, Selection::Word("runtime".into())); assert!(result.compatibility.is_none());
         assert!(capture.recent.accept(source(), 8, true, "terminal", now + Duration::from_millis(15)));
         // The copy remains a passive record; it no longer creates a second
         // automatic candidate independently of the completed probe request.
-        assert_eq!(result.word, "runtime");
+        assert_eq!(result.selection, Selection::Word("runtime".into()));
     }
     #[test] fn api6_source_focus_epoch_mode_or_new_input_change_invalidates_in_flight_operation() {
         let value = operation(); assert!(operation_valid(&value, source(), 1, true, false));

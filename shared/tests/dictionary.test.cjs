@@ -44,6 +44,9 @@ test('all lookup inputs share punctuation trimming without salvaging paths or co
   const cases=require('./selection-cases.json');
   for(const {raw,expected} of cases){
     if(expected===null)assert.throws(()=>normalizeSelection(raw),Error,JSON.stringify(raw));
-    else assert.equal(normalizeSelection(raw),expected,JSON.stringify(raw));
+    else {
+      assert.equal(normalizeSelection(raw),expected,JSON.stringify(raw));
+      assert.equal(normalizeSelection(expected),expected,`normalization must be stable: ${JSON.stringify(raw)}`);
+    }
   }
 });

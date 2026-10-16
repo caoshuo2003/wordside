@@ -1,7 +1,9 @@
+param([string]$ReleaseDirectory="")
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot -Parent
-$release=Join-Path $project 'release'
 $version=(Get-Content (Join-Path $project 'desktop\package.json') -Raw | ConvertFrom-Json).version
+$versionDirectory=Join-Path $project "release\v$version"
+$release=if ($ReleaseDirectory) {(Resolve-Path $ReleaseDirectory).Path} elseif(Test-Path $versionDirectory){$versionDirectory} else {Join-Path $project 'release'}
 $config=Get-Content (Join-Path $project 'desktop\src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json
 if($config.identifier -ne 'local.wordside.dictionary.api-preview' -or $config.productName -ne 'WordSide'){throw 'WordSide identity mismatch'}
 @("WordSide_${version}.exe","WordSide_${version}_x64-setup.exe") | ForEach-Object {

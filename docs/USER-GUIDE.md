@@ -2,17 +2,17 @@
 
 选中英文，查看释义，然后继续阅读。
 
-[下载 0.1.0](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.0) · [常见问题](FAQ.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
+[下载 0.1.1](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.1) · [常见问题](FAQ.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
 
 ## 安装与第一次查词
 
-WordSide 0.1.0 支持 **Windows x64**，需要 Microsoft Edge WebView2 和可访问 Cambridge 的网络。取词兼容与安装问题见[常见问题](FAQ.md)。
+WordSide 0.1.1 支持 **Windows x64**，需要 Microsoft Edge WebView2 和可访问 Cambridge 的网络。取词兼容与安装问题见[常见问题](FAQ.md)。
 
 | 方式 | 操作 |
 |---|---|
-| 安装版 · 推荐 | 下载 `WordSide_0.1.0_x64-setup.exe`，按提示安装，打开 WordSide |
-| 便携版 | 下载 `WordSide_0.1.0-portable.zip`，解压全部文件，运行其中的程序 |
-| 单独 EXE | 下载并运行 `WordSide_0.1.0.exe`；同一发布页提供第三方许可文件 |
+| 安装版 · 推荐 | 下载 `WordSide_0.1.1_x64-setup.exe`，按提示安装，打开 WordSide |
+| 便携版 | 下载 `WordSide_0.1.1-portable.zip`，解压全部文件，运行其中的程序 |
+| 单独 EXE | 下载并运行 `WordSide_0.1.1.exe`；同一发布页提供第三方许可文件 |
 
 打开后，在“手动查词”输入英文单词或短语，点击“查询”，即可查看词条。
 
@@ -55,7 +55,7 @@ WordSide 0.1.0 支持 **Windows x64**，需要 Microsoft Edge WebView2 和可访
 
 ## 选词不完整或没查到
 
-`“runtime,”`、`<terminal>=` 这类首尾符号会自动清理。单词内部的撇号和连字符会保留，例如 `don't`、`run-time`。
+`“runtime,”`、`<terminal>=`、`-workspace`、`--workspace` 这类首尾符号会自动清理。单词内部的撇号和连字符会保留，例如 `don't`、`run-time`；PDF 中的排版连字符也会转换为普通连字符。
 
 多选或少选字母时，若词典提供拼写建议，浮窗会显示“你可能想查”。点击其中一个候选继续查询，也可以回到输入框修改单词。
 

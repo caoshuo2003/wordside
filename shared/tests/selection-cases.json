@@ -81,11 +81,11 @@
   },
   {
     "raw": "--runtime",
-    "expected": null
+    "expected": "runtime"
   },
   {
     "raw": "-runtime",
-    "expected": null
+    "expected": "runtime"
   },
   {
     "raw": "foo\nbar",
@@ -157,6 +157,142 @@
   },
   {
     "raw": "runtime",
+    "expected": null
+  },
+  {
+    "raw": "-workspace",
+    "expected": "workspace"
+  },
+  {
+    "raw": "--workspace",
+    "expected": "workspace"
+  },
+  {
+    "raw": "workspace-",
+    "expected": "workspace"
+  },
+  {
+    "raw": "---workspace---",
+    "expected": "workspace"
+  },
+  {
+    "raw": " ( -workspace ), ",
+    "expected": "workspace"
+  },
+  {
+    "raw": "-state-of-the-art-",
+    "expected": "state-of-the-art"
+  },
+  {
+    "raw": "---don’t---",
+    "expected": "don't"
+  },
+  {
+    "raw": "‐workspace‐",
+    "expected": "workspace"
+  },
+  {
+    "raw": "‑workspace‑",
+    "expected": "workspace"
+  },
+  {
+    "raw": "‒workspace‒",
+    "expected": "workspace"
+  },
+  {
+    "raw": "―workspace―",
+    "expected": "workspace"
+  },
+  {
+    "raw": "−workspace−",
+    "expected": "workspace"
+  },
+  {
+    "raw": "﹘workspace﹘",
+    "expected": "workspace"
+  },
+  {
+    "raw": "﹣workspace﹣",
+    "expected": "workspace"
+  },
+  {
+    "raw": "－workspace－",
+    "expected": "workspace"
+  },
+  {
+    "raw": "–workspace—",
+    "expected": "workspace"
+  },
+  {
+    "raw": "“--WORKSPACE--”。",
+    "expected": "WORKSPACE"
+  },
+  {
+    "raw": " --  workspace — ",
+    "expected": "workspace"
+  },
+  {
+    "raw": "well‐known",
+    "expected": "well-known"
+  },
+  {
+    "raw": "well‑known",
+    "expected": "well-known"
+  },
+  {
+    "raw": "“‑well‑known‑”",
+    "expected": "well-known"
+  },
+  {
+    "raw": "---",
+    "expected": null
+  },
+  {
+    "raw": "---[]--",
+    "expected": null
+  },
+  {
+    "raw": "- 123 -",
+    "expected": null
+  },
+  {
+    "raw": "-/workspace",
+    "expected": null
+  },
+  {
+    "raw": "--workspace=/tmp",
+    "expected": null
+  },
+  {
+    "raw": "--workspace.log--",
+    "expected": null
+  },
+  {
+    "raw": "-workspace_name-",
+    "expected": null
+  },
+  {
+    "raw": "-workspace\nnext-",
+    "expected": null
+  },
+  {
+    "raw": "one—two",
+    "expected": null
+  },
+  {
+    "raw": "-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-",
+    "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "raw": "-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-",
+    "expected": null
+  },
+  {
+    "raw": "----------xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx----------",
+    "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "raw": "-----------xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-----------",
     "expected": null
   }
 ]

@@ -3,7 +3,8 @@ $ErrorActionPreference='Stop'
 if(!$Executable){
     $project=Split-Path $PSScriptRoot -Parent
     $version=(Get-Content (Join-Path $project 'desktop\package.json') -Raw | ConvertFrom-Json).version
-    $Executable=Join-Path $project "release\WordSide_${version}.exe"
+    $versionFile=Join-Path $project "release\v$version\WordSide_${version}.exe"
+    $Executable=if(Test-Path $versionFile){$versionFile}else{Join-Path $project "release\WordSide_${version}.exe"}
 }
 $Executable=(Resolve-Path $Executable).Path
 # This internal entry returns before Tauri, the tray and single-instance setup.

@@ -17,7 +17,7 @@ pub struct Snapshot { pub source: Source, pub sequence: u32, pub word: String, p
 impl Snapshot {
     pub fn valid_at(&self, sequence: u32, now: Instant) -> bool { self.sequence == sequence && now <= self.expires }
 }
-pub fn allows_fallback(failure: &Selection) -> bool { matches!(failure, Selection::NoSelection | Selection::Unsupported) }
+pub fn allows_fallback(failure: &Selection) -> bool { matches!(failure, Selection::NoSelection | Selection::Unreported | Selection::Unsupported | Selection::CopyUnavailable) }
 struct Pending { source: Source, before: u32, deadline: Instant }
 #[derive(Default)]
 pub struct RecentSelection { pending: Option<Pending>, snapshot: Option<Snapshot>, revision: u64 }
@@ -41,6 +41,9 @@ impl RecentSelection {
     }
     pub fn wants_clipboard(&self, source: Source, sequence: u32, now: Instant) -> bool {
         self.pending.as_ref().is_some_and(|v| v.source.matches(source) && sequence != v.before && now <= v.deadline)
+    }
+    pub fn clipboard_deadline(&self, source: Source, sequence: u32, now: Instant) -> Option<Instant> {
+        self.pending.as_ref().filter(|v|v.source.matches(source) && sequence!=v.before && now<=v.deadline).map(|v|v.deadline)
     }
     // The caller must recheck sequence/foreground after the read as well as owner.
     pub fn accept(&mut self, source: Source, sequence: u32, owner_matches: bool, text: &str, now: Instant) -> bool {
