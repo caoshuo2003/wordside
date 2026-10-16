@@ -84,12 +84,12 @@ function wordURL(word:string,language:'en-cn'|'en'='en-cn'){return `https://dict
 function normalizeSelection(raw:string){
   const value=raw.trim();
   if(Array.from(value).length>100||/[\u0000-\u001f\u007f-\u009f]/.test(value))throw new SelectionInputError('请选择单行英文单词或短语，不要选择日志、路径或命令。');
-  const edges="`\"'.,;:!?()[]{}“”‘’，。；：！？（）【】《》〈〉「」『』…·•–—_=+*|#$%^&<>";
+  const edges="`\"'.,;:!?()[]{}“”‘’，。；：！？（）【】《》〈〉「」『』…·•-‐‑‒–—―−﹘﹣－_=+*|#$%^&<>";
   const chars=Array.from(value);let start=0,end=chars.length;
   const isEdge=(char:string)=>/\s/.test(char)||edges.includes(char);
   while(start<end&&isEdge(chars[start]))start++;
   while(end>start&&isEdge(chars[end-1]))end--;
-  const word=chars.slice(start,end).join('').replace(/[‘’]/g,"'").replace(/\s+/g,' ');
+  const word=chars.slice(start,end).join('').replace(/[‘’]/g,"'").replace(/[\u2010\u2011]/g,'-').replace(/\s+/g,' ');
   if(!word||word.length>80||word.split(' ').length>5||!/[a-z]/i.test(word)||!/^[a-z0-9][a-z0-9 '-]*$/i.test(word))throw new SelectionInputError('请选择不超过 80 字符的英文单词或短语，不能包含多行、路径或命令。');
   return word;
 }

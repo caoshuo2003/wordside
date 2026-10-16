@@ -52,12 +52,33 @@ Linux 可运行 JS/TS 检查与浏览器预览。预览使用示例词条，不�
 
 ```text
 desktop/src-tauri/target/release/wordside.exe
-desktop/src-tauri/target/release/bundle/nsis/WordSide_0.1.0_x64-setup.exe
+desktop/src-tauri/target/release/bundle/nsis/WordSide_0.1.1_x64-setup.exe
 ```
 
 若指定 CARGO_TARGET_DIR，输出位于对应缓存目录。生成许可在 `desktop/src-tauri/generated/`，Tauri schema 在 `gen/`，均不提交源码。
 
-默认原生 test 检查 HTTP、解析、取消、缓存、设置与纯逻辑；跳过 `capture::` / `dismissal::`。可以用 `-TestFilter 'capture::shortcut::'` 单独检查纯快捷键解析；这项同样不操作桌面。过滤和跳过不算通过用例。真实选词、焦点、DPI、托盘与安装应另列手动验收，见[发布说明](releases/v0.1.0.md)。
+默认原生 test 检查 HTTP、解析、取消、缓存、设置与纯逻辑；跳过 `capture::` / `dismissal::`。可以用 `-TestFilter 'capture::shortcut::'` 单独检查纯快捷键解析；这项同样不操作桌面。取词事务相关检查可分别指定以下过滤器，均不注入输入、不打开测试窗口、不读写系统剪贴板：
+
+```text
+selection_input::tests::
+capture::tests::
+capture::copy_policy::
+capture::timing::
+capture::windows_copy::tests::
+capture::windows_copy::ole::tests::
+capture::input::tests::
+capture::windows_text::semantics_tests::
+capture::diagnostics::tests::
+capture::hotkey::tests::
+capture::windows::tests::
+capture::compatibility::tests::
+capture::selection::tests::
+capture::probe::protocol_tests::
+```
+
+其中 `windows_copy` 使用可丢弃的 Win32 内存数据，OLE 测试使用进程内数据对象，不连接系统剪贴板；`protocol_tests` 使用私有管道和合成子进程。不要用宽泛的 `capture::` 过滤器代替上述检查，它还包含会操作窗口的实机夹具。
+
+过滤和跳过不算通过用例。真实选词、焦点、DPI、托盘与安装应另列手动验收，见[发布说明](releases/v0.1.1.md)。
 
 ## 解析对照与诊断
 
@@ -75,19 +96,30 @@ npm test
 主程序提供初始化桌面前返回的诊断入口：
 
 ```powershell
-.\release\WordSide_0.1.0.exe --wordside-dictionary-probe en-cn:terminal en:runtime
-.\release\WordSide_0.1.0.exe --wordside-dictionary-parse C:\temp\sample-page.html
-.\release\WordSide_0.1.0.exe --wordside-dictionary-licenses
+.\release\v0.1.1\WordSide_0.1.1.exe --wordside-dictionary-probe en-cn:terminal en:runtime
+.\release\v0.1.1\WordSide_0.1.1.exe --wordside-dictionary-parse C:\temp\sample-page.html
+.\release\v0.1.1\WordSide_0.1.1.exe --wordside-dictionary-licenses
 ```
 
 探针不使用桌面缓存；后端计时不等于从选词到弹窗的完整耗时。在线查询不作为 CI 必需测试。Release 文件需先自行下载或按发布步骤生成。
+
+### 剪贴板备份诊断
+
+仅在用户同意访问当前剪贴板时运行：
+
+```powershell
+.\tools\diagnose-clipboard-formats.ps1
+.\tools\diagnose-clipboard-backup.ps1 -Executable .\release\v0.1.1\WordSide_0.1.1.exe
+```
+
+第一项只枚举格式编号和名称；第二项读取并临时复制当前数据到内部辅助进程内存，退出即释放，只输出状态、步骤、格式编号、错误码和耗时。两者都不发送按键、不清空或写入剪贴板，也不启动产品界面。取词故障优先查看设置目录的 `capture-status.json`：它只覆盖保存最近一次失败的阶段与状态，不含选词内容。上述只读诊断工具用于进一步排查特定状态。
 
 ## GitHub CI
 
 `.github/workflows/ci.yml` 在 main push、目标为 main 的 PR 与手动触发时执行：
 
 - Linux：锁文件安装、JS 测试、TypeScript 与 UI 构建。
-- Windows：同样检查，另外执行原生逻辑与纯快捷键解析测试。
+- Windows：同样检查，另外执行原生逻辑、纯快捷键解析及上述取词事务检查。
 
 CI 覆盖源码与自动化检查；真实桌面、安装和发布各自单独执行并记录。远端检查状态以 GitHub Actions 的实际结果为准。
 

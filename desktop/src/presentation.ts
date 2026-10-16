@@ -16,11 +16,15 @@ function lookupNotice(error:unknown):LookupNotice {
 function captureNotice(code:string):{title:string;message:string} {
   const notices:Record<string,{title:string;message:string}>={
     no_selection:{title:'没有读到选中文字',message:'重新选中单词后再试，或在下方输入。'},
+    unreported_selection:{title:'这里暂时无法取词',message:'重新选中后再试，或在下方输入。'},
     unsupported:{title:'这里暂时无法取词',message:'可以在下方直接输入要查的词。'},
     protected:{title:'此处无法取词',message:'为保护隐私，不读取受保护的内容。'},
     source_changed:{title:'请重新选词',message:'回到原来的窗口，选中单词后再试。'},
     invalid_selection:{title:'请选中英文单词',message:'选择一个单词或简短短语，也可以直接输入。'},
     access_denied:{title:'这里暂时无法取词',message:'可以在下方直接输入要查的词。'},
+    copy_unavailable:{title:'这里暂时无法取词',message:'重新选中后再试，或在下方直接输入。'},
+    clipboard_unavailable:{title:'暂时无法保留剪贴板',message:'当前内容保持不变，可以在下方直接输入。'},
+    clipboard_restore_failed:{title:'剪贴板恢复未完成',message:'请检查剪贴板内容；本次没有继续查询。'},
     read_error:{title:'暂时没有读到文字',message:'重新选词后再试，或在下方输入。'},
     timeout:{title:'取词有些慢',message:'重新选词后再试，或在下方输入。'}
   };

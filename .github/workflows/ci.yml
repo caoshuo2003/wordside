@@ -57,6 +57,25 @@ jobs:
           cargo --version
       - name: Test native dictionary and application logic
         run: ./tools/windows-cargo.ps1 -Action test
-      - name: Test default and custom hotkey parsing (no desktop)
+      - name: Test selection and hotkey logic (no desktop or system clipboard)
         run: |
-          ./tools/windows-cargo.ps1 -Action test -TestFilter 'capture::shortcut::'
+          $filters = @(
+            'capture::shortcut::',
+            'capture::tests::',
+            'capture::copy_policy::',
+            'capture::timing::',
+            'capture::windows_copy::tests::',
+            'capture::windows_copy::ole::tests::',
+            'capture::input::tests::',
+            'capture::windows_text::semantics_tests::',
+            'capture::diagnostics::tests::',
+            'capture::hotkey::tests::',
+            'capture::windows::tests::',
+            'capture::compatibility::tests::',
+            'capture::selection::tests::',
+            'capture::probe::protocol_tests::'
+          )
+          foreach ($filter in $filters) {
+            ./tools/windows-cargo.ps1 -Action test -TestFilter $filter
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }

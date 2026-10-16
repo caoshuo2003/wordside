@@ -2,8 +2,8 @@ use super::policy::selected_word;
 pub use super::selection::Selection;
 use serde::{Serialize,Deserialize};
 use std::ffi::c_void;
-use ::windows::Win32::{Foundation::{POINT,HWND},UI::Accessibility::{IUIAutomation,IUIAutomationElement,IUIAutomationTextPattern,UIA_TextPatternId}};
-#[derive(Clone,Copy,Serialize,Deserialize)]pub enum TextOrigin{Pointer(i32,i32),Focused,#[cfg(test)]Window}
+use ::windows::Win32::{Foundation::{POINT,HWND},UI::Accessibility::{IUIAutomation,IUIAutomationElement,IUIAutomationTextPattern,IUIAutomationTextRange,UIA_TextPatternId,UIA_IsReadOnlyAttributeId,UIA_EditControlTypeId,UIA_DocumentControlTypeId}};
+#[derive(Clone,Copy,Serialize,Deserialize)]pub enum TextOrigin{Pointer(i32,i32),Focused,Clipboard(u32),ObservedClipboard(u32),Backup,Restore(Option<u32>),#[cfg(test)]Window}
 #[derive(Clone,Serialize,Deserialize)]pub struct TextRequest{pub pid:u32,pub window:isize,pub origin:TextOrigin,#[serde(default)]pub focus:isize}
 type Handle=isize;
 #[derive(Default)]#[repr(C)]struct FocusRect{left:i32,top:i32,right:i32,bottom:i32}
@@ -56,6 +56,20 @@ fn uia_error(operation:&str,error: ::windows::core::Error)->Selection{
  else{Selection::ReadError(format!("{operation}: 0x{code:08x}"))}
 }
 
+// An empty accessibility range is not proof that a PDF's own selection is
+// empty. Only a positively read-only document can use generic copy to check it.
+// Editors (including empty rich-text ranges) must not copy a whole line instead.
+fn empty_range(document: bool, editor: bool, read_only: Option<bool>) -> Option<Selection> {
+ if editor || read_only==Some(false) { Some(Selection::NoSelection) }
+ else if document && read_only==Some(true) { Some(Selection::Unreported) }
+ else { None }
+}
+unsafe fn read_only(range: &IUIAutomationTextRange) -> Option<bool> {
+ let value=range.GetAttributeValue(UIA_IsReadOnlyAttributeId).ok()?;
+ // Do not coerce UIA's Mixed/NotSupported sentinel or another VARIANT type.
+ (value.vt()==::windows::Win32::System::Variant::VT_BOOL).then(||bool::try_from(&value).ok()).flatten()
+}
+
 // Verify the unfiltered ancestor path belongs to this source before reading text.
 // Browser renderers can have a different PID from the foreground root window.
 unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,window:Handle,original_focus:Handle)->Selection{
@@ -75,9 +89,11 @@ unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,wind
  }
  if !belongs{return Selection::SourceMismatch;}
  if original_focus!=0{if let Some(selection)=super::windows_edit::selected_edit(original_focus,root){return selection;}}
- let mut supported=false;
+ let mut supported=false; let mut editor=false;
  for (element,native) in elements{
   if native!=0{if let Some(selection)=super::windows_edit::selected_edit(native,root){return selection;}}
+  let control=match element.CurrentControlType(){Ok(value)=>value,Err(error)=>return uia_error("Control type",error)};
+  editor|=control==UIA_EditControlTypeId;
   let pattern=match element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId){
    Ok(value)=>value,Err(error)if matches!(error.code().0 as u32,0|0x80004002|::windows::Win32::UI::Accessibility::UIA_E_NOTSUPPORTED)=>continue,
    Err(error)=>return uia_error("TextPattern",error),
@@ -86,10 +102,17 @@ unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,wind
   supported=true;
   let ranges=match pattern.GetSelection(){Ok(value)=>value,Err(error)if error.code().0==0=>continue,Err(error)=>return uia_error("GetSelection",error)};
   let length=match ranges.Length(){Ok(value)=>value,Err(error)=>return uia_error("Selection count",error)};
-  if length==0{continue;}if length!=1{return Selection::InvalidWord;}
+  if length==0{
+   let readonly=pattern.DocumentRange().ok().and_then(|range|read_only(&range));
+   if let Some(selection)=empty_range(control==UIA_DocumentControlTypeId,editor,readonly){return selection;}
+   continue;
+  }if length!=1{return Selection::InvalidWord;}
   let range=match ranges.GetElement(0){Ok(value)=>value,Err(error)=>return uia_error("Selection range",error)};
   let text=match range.GetText(101){Ok(value)=>value.to_string(),Err(error)=>return uia_error("Selected text",error)};
-  if text.is_empty(){continue;}if text.encode_utf16().count()>100{return Selection::InvalidWord;}
+  if text.is_empty(){
+   if let Some(selection)=empty_range(control==UIA_DocumentControlTypeId,editor,read_only(&range)){return selection;}
+   continue;
+  }if text.encode_utf16().count()>100{return Selection::InvalidWord;}
   return selected_word(&text).map(Selection::Word).unwrap_or(Selection::InvalidWord);
  }
  if supported{Selection::NoSelection}else{Selection::Unsupported}
@@ -103,11 +126,13 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
    if !focus_matches(root,request.focus){return Selection::SourceMismatch;}
    if request.focus!=0{let focus_root=GetAncestor(request.focus,2);if request.focus!=root&&focus_root!=root{return Selection::SourceMismatch;}}
   }
+  if let TextOrigin::Clipboard(sequence)=request.origin{return super::windows_copy::read_copied(request,sequence).selection;}
   let mut class=[0u16;64];let length=GetClassNameW(request.window,class.as_mut_ptr(),64);
   if length>0&&String::from_utf16_lossy(&class[..length as usize])=="ConsoleWindowClass"{return console_selection(request);}
   let first=match request.origin{
    TextOrigin::Pointer(x,y)=>automation.ElementFromPoint(POINT{x,y}),
    TextOrigin::Focused=>automation.GetFocusedElement(),
+   TextOrigin::Clipboard(_)|TextOrigin::ObservedClipboard(_)|TextOrigin::Backup|TextOrigin::Restore(_)=>unreachable!("clipboard operations are dispatched before UIA"),
    #[cfg(test)]TextOrigin::Window=>automation.ElementFromHandle(HWND(request.window as *mut c_void)),
   };
   match first{
@@ -121,6 +146,32 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
     result
    },Err(error)=>uia_error("Source element",error)
   }
+ }
+}
+
+#[cfg(test)]mod semantics_tests {
+ use super::*;
+ #[test]fn read_only_document_empty_range_is_unknown_and_requires_copy_verification(){
+  let result=empty_range(true,false,Some(true)).unwrap();
+  assert_eq!(result,Selection::Unreported);
+  assert!(super::super::copy_policy::should_verify(&result));
+ }
+ #[test]fn empty_editors_never_borrow_a_read_only_ancestor_or_copy_a_whole_line(){
+  for read_only in [Some(true),Some(false),None] {
+   let result=empty_range(true,true,read_only).unwrap();
+   assert_eq!(result,Selection::NoSelection); assert!(!super::super::copy_policy::should_verify(&result));
+  }
+  assert_eq!(empty_range(true,false,Some(false)),Some(Selection::NoSelection));
+ }
+ #[test]fn mixed_unknown_or_non_document_empty_ranges_do_not_authorize_copy(){
+  for document in [false,true] { assert_eq!(empty_range(document,false,None),None); }
+  assert_eq!(empty_range(false,false,Some(true)),None);
+ }
+ #[test]fn readonly_attribute_accepts_only_real_variant_booleans(){
+  use ::windows::Win32::System::Variant::{VARIANT,VT_BOOL};
+  let yes=VARIANT::from(true); let no=VARIANT::from(false); let numeric=VARIANT::from(1i32);
+  assert_eq!(yes.vt(),VT_BOOL); assert_eq!(bool::try_from(&yes).ok(),Some(true));
+  assert_eq!(bool::try_from(&no).ok(),Some(false)); assert_ne!(numeric.vt(),VT_BOOL);
  }
 }
 
@@ -251,7 +302,10 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
    let element=automation.ElementFromHandle(HWND(fixture.edit as *mut c_void)).unwrap();
    assert_eq!(from_element(&automation,element,fixture.other,0),Selection::SourceMismatch,"other source window must not borrow this selection");
    assert_eq!(read(fixture.password),Selection::Protected);
-   SendMessageW(fixture.edit,0xB1,0,0);assert_eq!(read(fixture.edit),Selection::NoSelection,"insertion point is not selected text");
+   SendMessageW(fixture.edit,0xB1,0,0);
+   // This fixture is ES_READONLY and exposes a Document TextPattern. An empty
+   // range is deliberately unknown until copy verification, as in PDF readers.
+   assert_eq!(read(fixture.edit),Selection::Unreported,"an empty read-only document must not publish text without verification");
    for(value,expected)in [("(runtime),",Selection::Word("runtime".into())),("foo\r\nbar",Selection::InvalidWord),("C:\\Users\\Admin",Selection::InvalidWord),("x".repeat(120).as_str(),Selection::InvalidWord)]{
     SendMessageW(fixture.edit,0x0C,0,wide(value).as_ptr() as isize);SendMessageW(fixture.edit,0xB1,0,-1);assert_eq!(read(fixture.edit),expected,"{value}");
    }

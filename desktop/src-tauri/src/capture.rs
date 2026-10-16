@@ -1,6 +1,10 @@
 use tauri::AppHandle;
 mod policy;
 mod compatibility;
+mod copy_policy;
+mod timing;
+#[cfg(windows)]mod diagnostics;
+#[cfg(windows)]mod windows_copy;
 #[cfg(windows)]mod input;
 pub mod shortcut;
 pub mod selection;
@@ -39,7 +43,7 @@ mod tests{
     #[test]fn intentional_mouse_and_copy_inputs(){use policy::{mouse_selection,copy_chord};assert!(!mouse_selection((0,0),(2,1),false,false));assert!(mouse_selection((0,0),(5,0),false,false));assert!(mouse_selection((0,0),(0,0),true,false));assert!(mouse_selection((0,0),(0,0),false,true));assert!(copy_chord(true,true,false,false,false));assert!(copy_chord(true,false,true,false,false));assert!(!copy_chord(false,true,false,false,false));assert!(!copy_chord(true,true,false,true,false));assert!(!copy_chord(true,true,false,false,true));}
     #[test]fn words_and_phrases(){assert_eq!(selected_word(" `terminal,` ").as_deref(),Some("terminal"));assert_eq!(selected_word("run on the spot").as_deref(),Some("run on the spot"));assert!(selected_word("don't").is_some());assert_eq!(selected_word("terminal\r\n").as_deref(),Some("terminal"));}
     #[test]fn idle_polling(){assert_eq!(poll_interval(false,false),250);assert_eq!(poll_interval(true,false),20);assert_eq!(poll_interval(false,true),20);}
-    #[test]fn punctuation_selection(){for s in ["“runtime”。","(runtime),","runtime()"]{assert_eq!(selected_word(s).as_deref(),Some("runtime"));}assert!(selected_word("--runtime").is_none());assert_eq!(selected_word("termnal").as_deref(),Some("termnal"));}
+    #[test]fn punctuation_selection(){for s in ["“runtime”。","(runtime),","runtime()","--runtime","-runtime"]{assert_eq!(selected_word(s).as_deref(),Some("runtime"));}assert_eq!(selected_word("termnal").as_deref(),Some("termnal"));}
     #[test]fn rejects_logs_paths_and_commands(){for s in ["foo\nbar","C:\\Users\\Admin","https://example.com","rm -rf /","12345",""]{assert!(selected_word(s).is_none(),"{s}");}}
     #[test]fn limits_clipboard(){assert!(selected_word(&"x".repeat(81)).is_none());assert!(selected_word("one two three four five six").is_none());}
     #[test]fn monitor_edges_and_negative_coordinates(){assert_eq!(place(1910,1070,480,680,(0,0,1920,1080)),(1432,378));let (x,y)=place(-1900,100,480,680,(-1920,0,0,1080));assert!(x>=-1912&&x+480<=-8&&y>=8&&y+680<=1072);}

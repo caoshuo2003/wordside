@@ -39,7 +39,7 @@ test('invalid selected inputs guide correction without pretending the dictionary
  assert.equal(normalizeSelection('**terminal**'),'terminal');
 });
 test('capture states use concise local copy including unknown or inherited property names',()=>{
- for(const code of ['no_selection','unsupported','protected','source_changed','invalid_selection','access_denied','read_error','timeout','unknown','__proto__','constructor']){
+ for(const code of ['no_selection','unreported_selection','unsupported','protected','source_changed','invalid_selection','access_denied','read_error','copy_unavailable','clipboard_unavailable','clipboard_restore_failed','timeout','unknown','__proto__','constructor']){
   const value=captureNotice(code);assert.equal(typeof value.title,'string');assert.equal(typeof value.message,'string');assert.ok(value.message.length<40);assert.doesNotMatch(JSON.stringify(value),/API|接口|进程|权限|GetSelection/);
  }
  assert.notEqual(captureNotice('protected').message,captureNotice('no_selection').message);
