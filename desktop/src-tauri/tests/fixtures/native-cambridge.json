@@ -308,6 +308,159 @@
       }
     },
     {
+      "name": "standalone-phrase-entry",
+      "html": "<!doctype html><html><head><title>Synthetic phrase - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/sample-phrase\"></head><body>\n<div class=\"pr di superentry\"><div class=\"di-body\"><span class=\"phrase-di-block dphrase-di-block\">\n<div class=\"di-title\"><h2 class=\"headword tw-bw dhw dpos-h_hw\"><b>the sample phrase</b></h2></div>\n<span class=\"di-info\"><span class=\"pos dpos\">phrase</span></span><span class=\"phrase-di-body dphrase-di-body\">\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic phrase meaning.</div></div>\n<div class=\"def-body ddef_b\"><span class=\"trans dtrans\"><a><span class=\"dtrans\">短语</span></a>测试释义</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">A synthetic phrase example.</span><span class=\"trans dtrans\">短语例句。</span></div>\n<div class=\"examp dexamp\"><span class=\"eg deg\">Another phrase example.</span></div></div></div>\n</span></span></div></div></body></html>",
+      "entry": {
+        "word": "the sample phrase",
+        "pos": [
+          "phrase"
+        ],
+        "pronunciation": [],
+        "definition": [
+          {
+            "id": 0,
+            "pos": "phrase",
+            "text": "A synthetic phrase meaning.",
+            "translation": "短语测试释义",
+            "example": [
+              {
+                "id": 0,
+                "text": "A synthetic phrase example.",
+                "translation": "短语例句。"
+              },
+              {
+                "id": 1,
+                "text": "Another phrase example.",
+                "translation": ""
+              }
+            ]
+          }
+        ],
+        "verbs": []
+      },
+      "extension": true
+    },
+    {
+      "name": "mixed-word-and-phrase",
+      "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div>\n<div class=\"pr di superentry\"><div class=\"di-body\"><span class=\"phrase-di-block dphrase-di-block\">\n<div class=\"di-title\"><h2 class=\"headword tw-bw dhw dpos-h_hw\"><b>the sample phrase</b></h2></div>\n<span class=\"di-info\"><span class=\"pos dpos\">phrase</span></span><span class=\"phrase-di-body dphrase-di-body\">\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic phrase meaning.</div></div>\n<div class=\"def-body ddef_b\"><span class=\"trans dtrans\"><a><span class=\"dtrans\">短语</span></a>测试释义</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">A synthetic phrase example.</span><span class=\"trans dtrans\">短语例句。</span></div>\n<div class=\"examp dexamp\"><span class=\"eg deg\">Another phrase example.</span></div></div></div>\n</span></span></div></div></body></html>",
+      "entry": {
+        "word": "example",
+        "pos": [
+          "noun",
+          "phrase"
+        ],
+        "pronunciation": [
+          {
+            "pos": "noun",
+            "lang": "uk",
+            "url": "https://dictionary.cambridge.org/media/test.mp3",
+            "pron": "/test/"
+          },
+          {
+            "pos": "noun",
+            "lang": "us",
+            "url": "https://dictionary.cambridge.org/us/media/test.mp3",
+            "pron": "/test/"
+          }
+        ],
+        "definition": [
+          {
+            "id": 0,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "A synthetic meaning for a test.",
+            "translation": "测试释义；补充译文",
+            "example": [
+              {
+                "id": 0,
+                "text": "This is one example.",
+                "translation": "这是一个例句。"
+              },
+              {
+                "id": 1,
+                "text": "An untranslated example.",
+                "translation": ""
+              }
+            ]
+          },
+          {
+            "id": 1,
+            "pos": "noun",
+            "source": "SYNTHETIC",
+            "text": "Another synthetic meaning.",
+            "translation": "",
+            "example": [
+              {
+                "id": 0,
+                "text": "A second sense example.",
+                "translation": "另一个释义的例句。"
+              }
+            ]
+          },
+          {
+            "id": 2,
+            "pos": "phrase",
+            "text": "A synthetic phrase meaning.",
+            "translation": "短语测试释义",
+            "example": [
+              {
+                "id": 0,
+                "text": "A synthetic phrase example.",
+                "translation": "短语例句。"
+              },
+              {
+                "id": 1,
+                "text": "Another phrase example.",
+                "translation": ""
+              }
+            ]
+          }
+        ],
+        "verbs": []
+      },
+      "extension": true
+    },
+    {
+      "name": "phrase-truncated",
+      "html": "<!doctype html><html><head><title>Synthetic phrase - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/sample-phrase\"></head><body>\n<div class=\"pr di superentry\"><div class=\"di-body\"><span class=\"phrase-di-block dphrase-di-block\">\n<div class=\"di-title\"><h2 class=\"headword tw-bw dhw dpos-h_hw\"><b>the sample phrase</b></h2></div>\n<span class=\"di-info\"><span class=\"pos dpos\">phrase</span></span><span class=\"phrase-di-body dphrase-di-body\">\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic phrase meaning.</div></div>\n<div class=\"def-body ddef_b\"><span class=\"trans dtrans\"><a><span class=\"dtrans\">短语</span></a>测试释义</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">A synthetic phrase example.</span><span class=\"trans dtrans\">短语例句。</span></div>\n<div class=\"examp dexamp\"><span class=\"eg deg\">Another phrase example.</span></div></div></div>\n</span></span></div></div></body>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "phrase-missing-def",
+      "html": "<!doctype html><html><head><title>Synthetic phrase - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/sample-phrase\"></head><body>\n<div class=\"pr di superentry\"><div class=\"di-body\"><span class=\"phrase-di-block dphrase-di-block\">\n<div class=\"di-title\"><h2 class=\"headword tw-bw dhw dpos-h_hw\"><b>the sample phrase</b></h2></div>\n<span class=\"di-info\"><span class=\"pos dpos\">phrase</span></span><span class=\"phrase-di-body dphrase-di-body\">\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"broken\">A synthetic phrase meaning.</div></div>\n<div class=\"def-body ddef_b\"><span class=\"trans dtrans\"><a><span class=\"dtrans\">短语</span></a>测试释义</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">A synthetic phrase example.</span><span class=\"trans dtrans\">短语例句。</span></div>\n<div class=\"examp dexamp\"><span class=\"eg deg\">Another phrase example.</span></div></div></div>\n</span></span></div></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "phrase-missing-example",
+      "html": "<!doctype html><html><head><title>Synthetic phrase - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/sample-phrase\"></head><body>\n<div class=\"pr di superentry\"><div class=\"di-body\"><span class=\"phrase-di-block dphrase-di-block\">\n<div class=\"di-title\"><h2 class=\"headword tw-bw dhw dpos-h_hw\"><b>the sample phrase</b></h2></div>\n<span class=\"di-info\"><span class=\"pos dpos\">phrase</span></span><span class=\"phrase-di-body dphrase-di-body\">\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic phrase meaning.</div></div>\n<div class=\"def-body ddef_b\"><span class=\"trans dtrans\"><a><span class=\"dtrans\">短语</span></a>测试释义</span>\n<div class=\"examp dexamp\"><span class=\"broken\">A synthetic phrase example.</span><span class=\"trans dtrans\">短语例句。</span></div>\n<div class=\"examp dexamp\"><span class=\"eg deg\">Another phrase example.</span></div></div></div>\n</span></span></div></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "phrase-outside-block",
+      "html": "<!doctype html><html><head><title>Synthetic phrase - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/sample-phrase\"></head><body>\n<div class=\"pr di superentry\"><div class=\"di-body\"><span class=\"broken\">\n<div class=\"di-title\"><h2 class=\"headword tw-bw dhw dpos-h_hw\"><b>the sample phrase</b></h2></div>\n<span class=\"di-info\"><span class=\"pos dpos\">phrase</span></span><span class=\"phrase-di-body dphrase-di-body\">\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic phrase meaning.</div></div>\n<div class=\"def-body ddef_b\"><span class=\"trans dtrans\"><a><span class=\"dtrans\">短语</span></a>测试释义</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">A synthetic phrase example.</span><span class=\"trans dtrans\">短语例句。</span></div>\n<div class=\"examp dexamp\"><span class=\"eg deg\">Another phrase example.</span></div></div></div>\n</span></span></div></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
+      "name": "phrase-outside-title",
+      "html": "<!doctype html><html><head><title>Synthetic phrase - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/sample-phrase\"></head><body>\n<div class=\"pr di superentry\"><div class=\"di-body\"><span class=\"phrase-di-block dphrase-di-block\">\n<div class=\"broken\"><h2 class=\"headword tw-bw dhw dpos-h_hw\"><b>the sample phrase</b></h2></div>\n<span class=\"di-info\"><span class=\"pos dpos\">phrase</span></span><span class=\"phrase-di-body dphrase-di-body\">\n<div class=\"def-block ddef_block\"><div class=\"ddef_h\"><div class=\"def ddef_d db\">A synthetic phrase meaning.</div></div>\n<div class=\"def-body ddef_b\"><span class=\"trans dtrans\"><a><span class=\"dtrans\">短语</span></a>测试释义</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">A synthetic phrase example.</span><span class=\"trans dtrans\">短语例句。</span></div>\n<div class=\"examp dexamp\"><span class=\"eg deg\">Another phrase example.</span></div></div></div>\n</span></span></div></div></body></html>",
+      "error": {
+        "status": 502,
+        "code": "INVALID_CAMBRIDGE_PAGE"
+      }
+    },
+    {
       "name": "truncated",
       "html": "<!doctype html><html><head><title>EXAMPLE - Cambridge Dictionary</title>\n<link rel=\"canonical\" href=\"https://dictionary.cambridge.org/dictionary/english-chinese-simplified/example\"></head><body>\n<div class=\"pr dictionary\" data-id=\"SYNTHETIC\"><div class=\"entry-body\"><div class=\"pr entry-body__el\">\n<div class=\"pos-header dpos-h\"><span class=\"headword\"><span class=\"hw dhw\">example</span></span><div class=\"dpos-g\"><span class=\"pos dpos\">noun</span></div>\n<span class=\"uk dpron-i\"><span class=\"region dreg\">uk</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/media/test.mp3\"></audio></span>\n<span class=\"us dpron-i\"><span class=\"region dreg\">us</span><span class=\"pron dpron\">/test/</span><audio><source src=\"/us/media/test.mp3\"></audio></span></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">A synthetic <b>meaning</b> for a test.</div><div class=\"def-body ddef_b\"><span class=\"trans dtrans\">测试<span class=\"dtrans\">释义</span></span><span class=\"trans dtrans\">；补充译文</span>\n<div class=\"examp dexamp\"><span class=\"eg deg\">This is <b>one</b> example.</span><span class=\"trans dtrans\">这是一个例句。</span></div><div class=\"examp dexamp\"><span class=\"eg deg\">An untranslated example.</span></div></div></div>\n<div class=\"def-block ddef_block\"><div class=\"def ddef_d db\">Another synthetic meaning.</div><div class=\"def-body ddef_b\"><div class=\"examp dexamp\"><span class=\"eg deg\">A second sense example.</span><span class=\"trans dtrans\">另一个释义的例句。</span></div></div></div>\n</div></div></div><div class=\"daccord\"><span class=\"eg dexamp\">Additional unassigned corpus example.</span></div></body>",
       "error": {

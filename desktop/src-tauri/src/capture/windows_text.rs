@@ -5,6 +5,30 @@ use std::ffi::c_void;
 use ::windows::Win32::{Foundation::{POINT,HWND},UI::Accessibility::{IUIAutomation,IUIAutomationElement,IUIAutomationTextPattern,IUIAutomationTextRange,UIA_TextPatternId,UIA_IsReadOnlyAttributeId,UIA_EditControlTypeId,UIA_DocumentControlTypeId}};
 #[derive(Clone,Copy,Serialize,Deserialize)]pub enum TextOrigin{Pointer(i32,i32),Focused,Clipboard(u32),ObservedClipboard(u32),Backup,Restore(Option<u32>),#[cfg(test)]Window}
 #[derive(Clone,Serialize,Deserialize)]pub struct TextRequest{pub pid:u32,pub window:isize,pub origin:TextOrigin,#[serde(default)]pub focus:isize}
+// Fixed classifications only: never persist element names, runtime IDs or text.
+#[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
+#[serde(rename_all="snake_case")]
+pub enum ProviderRejection {
+ SourceProcessChanged, NativeForegroundChanged, NativeFocusChanged, NativeFocusForeignRoot, NativeRangeSourceChanged,
+ AncestorForeignRoot, AncestorLimit, FinalForegroundChanged, FinalNativeFocusChanged,
+ UiaFocusChanged, ElementUnavailable,
+}
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,Serialize,Deserialize)]
+pub struct ProviderDiagnostics {
+ #[serde(skip_serializing_if="Option::is_none")] pub rejected_at:Option<ProviderRejection>,
+ pub ancestor_count:usize,
+}
+impl ProviderDiagnostics {
+ fn reject(&mut self,reason:ProviderRejection)->Selection {self.rejected_at=Some(reason);Selection::SourceMismatch}
+ fn native_result(&mut self,selection:Selection)->Selection {
+  if matches!(selection,Selection::SourceMismatch) {self.rejected_at=Some(ProviderRejection::NativeRangeSourceChanged);}
+  selection
+ }
+ pub fn completed(mut self,selection:&Selection)->Self {
+  if !matches!(selection,Selection::SourceMismatch) {self.rejected_at=None;}
+  self
+ }
+}
 type Handle=isize;
 #[derive(Default)]#[repr(C)]struct FocusRect{left:i32,top:i32,right:i32,bottom:i32}
 #[derive(Default)]#[repr(C)]struct GuiInfo{size:u32,flags:u32,active:Handle,focus:Handle,capture:Handle,menu:Handle,moving:Handle,caret:Handle,rect:FocusRect}
@@ -48,11 +72,11 @@ fn console_selection(request:&TextRequest)->Selection{
   Selection::ReadError("AttachConsole".into())
  }
 }
-fn uia_error(operation:&str,error: ::windows::core::Error)->Selection{
+fn uia_error(operation:&str,error: ::windows::core::Error,trace:&mut ProviderDiagnostics)->Selection{
  let code=error.code().0 as u32;
  if code==::windows::Win32::UI::Accessibility::UIA_E_TIMEOUT{Selection::Timeout}
  else if code==0x80070005{Selection::AccessDenied}
- else if code==::windows::Win32::UI::Accessibility::UIA_E_ELEMENTNOTAVAILABLE{Selection::SourceMismatch}
+ else if code==::windows::Win32::UI::Accessibility::UIA_E_ELEMENTNOTAVAILABLE{trace.reject(ProviderRejection::ElementUnavailable)}
  else{Selection::ReadError(format!("{operation}: 0x{code:08x}"))}
 }
 
@@ -72,43 +96,44 @@ unsafe fn read_only(range: &IUIAutomationTextRange) -> Option<bool> {
 
 // Verify the unfiltered ancestor path belongs to this source before reading text.
 // Browser renderers can have a different PID from the foreground root window.
-unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,window:Handle,original_focus:Handle)->Selection{
+unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,window:Handle,original_focus:Handle,trace:&mut ProviderDiagnostics)->Selection{
  let root=GetAncestor(window,2);let root=if root==0{window}else{root};
- let target=match automation.ElementFromHandle(HWND(root as *mut c_void)){Ok(value)=>value,Err(error)=>return uia_error("Source window",error)};
- let walker=match automation.RawViewWalker(){Ok(value)=>value,Err(error)=>return uia_error("RawViewWalker",error)};
+ let target=match automation.ElementFromHandle(HWND(root as *mut c_void)){Ok(value)=>value,Err(error)=>return uia_error("Source window",error,trace)};
+ let walker=match automation.RawViewWalker(){Ok(value)=>value,Err(error)=>return uia_error("RawViewWalker",error,trace)};
  let mut cursor=first;let mut elements=Vec::new();let mut belongs=false;
  for _ in 0..32{
-  match cursor.CurrentIsPassword(){Ok(value)if value.as_bool()=>return Selection::Protected,Ok(_)=>{},Err(error)=>return uia_error("IsPassword",error)}
+  trace.ancestor_count+=1;
+  match cursor.CurrentIsPassword(){Ok(value)if value.as_bool()=>return Selection::Protected,Ok(_)=>{},Err(error)=>return uia_error("IsPassword",error,trace)}
   let native=match cursor.CurrentNativeWindowHandle(){
-   Ok(handle)=>{let native=handle.0 as isize;if native!=0{let ancestor=GetAncestor(native,2);if native!=root&&ancestor!=root{return Selection::SourceMismatch;}}native},
-   Err(error)=>return uia_error("NativeWindowHandle",error),
+   Ok(handle)=>{let native=handle.0 as isize;if native!=0{let ancestor=GetAncestor(native,2);if native!=root&&ancestor!=root{return trace.reject(ProviderRejection::AncestorForeignRoot);}}native},
+   Err(error)=>return uia_error("NativeWindowHandle",error,trace),
   };
   elements.push((cursor.clone(),native));
-  match automation.CompareElements(&cursor,&target){Ok(value)if value.as_bool()=>{belongs=true;break;},Ok(_)=>{},Err(error)=>return uia_error("CompareElements",error)}
-  match walker.GetParentElement(&cursor){Ok(parent)=>cursor=parent,Err(error)=>return uia_error("Parent element",error),}
+  match automation.CompareElements(&cursor,&target){Ok(value)if value.as_bool()=>{belongs=true;break;},Ok(_)=>{},Err(error)=>return uia_error("CompareElements",error,trace)}
+  match walker.GetParentElement(&cursor){Ok(parent)=>cursor=parent,Err(error)=>return uia_error("Parent element",error,trace),}
  }
- if !belongs{return Selection::SourceMismatch;}
- if original_focus!=0{if let Some(selection)=super::windows_edit::selected_edit(original_focus,root){return selection;}}
+ if !belongs{return trace.reject(ProviderRejection::AncestorLimit);}
+ if original_focus!=0{if let Some(selection)=super::windows_edit::selected_edit(original_focus,root){return trace.native_result(selection);}}
  let mut supported=false; let mut editor=false;
  for (element,native) in elements{
-  if native!=0{if let Some(selection)=super::windows_edit::selected_edit(native,root){return selection;}}
-  let control=match element.CurrentControlType(){Ok(value)=>value,Err(error)=>return uia_error("Control type",error)};
+  if native!=0{if let Some(selection)=super::windows_edit::selected_edit(native,root){return trace.native_result(selection);}}
+  let control=match element.CurrentControlType(){Ok(value)=>value,Err(error)=>return uia_error("Control type",error,trace)};
   editor|=control==UIA_EditControlTypeId;
   let pattern=match element.GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId){
    Ok(value)=>value,Err(error)if matches!(error.code().0 as u32,0|0x80004002|::windows::Win32::UI::Accessibility::UIA_E_NOTSUPPORTED)=>continue,
-   Err(error)=>return uia_error("TextPattern",error),
+   Err(error)=>return uia_error("TextPattern",error,trace),
   };
-  match pattern.SupportedTextSelection(){Ok(value)if value.0==0=>continue,Ok(_)=>{},Err(error)=>return uia_error("SupportedTextSelection",error)}
+  match pattern.SupportedTextSelection(){Ok(value)if value.0==0=>continue,Ok(_)=>{},Err(error)=>return uia_error("SupportedTextSelection",error,trace)}
   supported=true;
-  let ranges=match pattern.GetSelection(){Ok(value)=>value,Err(error)if error.code().0==0=>continue,Err(error)=>return uia_error("GetSelection",error)};
-  let length=match ranges.Length(){Ok(value)=>value,Err(error)=>return uia_error("Selection count",error)};
+  let ranges=match pattern.GetSelection(){Ok(value)=>value,Err(error)if error.code().0==0=>continue,Err(error)=>return uia_error("GetSelection",error,trace)};
+  let length=match ranges.Length(){Ok(value)=>value,Err(error)=>return uia_error("Selection count",error,trace)};
   if length==0{
    let readonly=pattern.DocumentRange().ok().and_then(|range|read_only(&range));
    if let Some(selection)=empty_range(control==UIA_DocumentControlTypeId,editor,readonly){return selection;}
    continue;
   }if length!=1{return Selection::InvalidWord;}
-  let range=match ranges.GetElement(0){Ok(value)=>value,Err(error)=>return uia_error("Selection range",error)};
-  let text=match range.GetText(101){Ok(value)=>value.to_string(),Err(error)=>return uia_error("Selected text",error)};
+  let range=match ranges.GetElement(0){Ok(value)=>value,Err(error)=>return uia_error("Selection range",error,trace)};
+  let text=match range.GetText(101){Ok(value)=>value.to_string(),Err(error)=>return uia_error("Selected text",error,trace)};
   if text.is_empty(){
    if let Some(selection)=empty_range(control==UIA_DocumentControlTypeId,editor,read_only(&range)){return selection;}
    continue;
@@ -119,29 +144,35 @@ unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,wind
 }
 // Native ranges can be read without touching the clipboard or starting UIA.
 // Only a focused, same-root HWND is eligible, rechecked after the range read.
-pub fn native_selection(request: &TextRequest) -> Option<Selection> { unsafe {
+pub fn native_selection(request: &TextRequest,trace:&mut ProviderDiagnostics) -> Option<Selection> { unsafe {
  if !matches!(request.origin,TextOrigin::Focused) || request.focus==0 {return None;}
  let root=GetAncestor(request.window,2); let root=if root==0 {request.window}else{root};
- let valid=||{
+ let rejection=||{
   let mut source_pid=0; GetWindowThreadProcessId(root,&mut source_pid);
   let foreground=GetForegroundWindow(); let active=GetAncestor(foreground,2);
-  request.pid!=0 && source_pid==request.pid && (if active==0 {foreground}else{active})==root
-   && focus_matches(root,request.focus) && GetAncestor(request.focus,2)==root
+  if request.pid==0 || source_pid!=request.pid {Some(ProviderRejection::SourceProcessChanged)}
+  else if (if active==0 {foreground}else{active})!=root {Some(ProviderRejection::NativeForegroundChanged)}
+  else if !focus_matches(root,request.focus) {Some(ProviderRejection::NativeFocusChanged)}
+  else if GetAncestor(request.focus,2)!=root {Some(ProviderRejection::NativeFocusForeignRoot)}
+  else {None}
  };
- if !valid() {return Some(Selection::SourceMismatch);}
+ if let Some(reason)=rejection() {return Some(trace.reject(reason));}
  let selection=super::windows_edit::selected_edit(request.focus,root)?;
- Some(if valid() {selection}else{Selection::SourceMismatch})
+ Some(if let Some(reason)=rejection() {trace.reject(reason)}else{trace.native_result(selection)})
 } }
-pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
+#[cfg(test)]pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
+ selected_text_diagnosed(automation,request,&mut ProviderDiagnostics::default())
+}
+pub fn selected_text_diagnosed(automation:&IUIAutomation,request:&TextRequest,trace:&mut ProviderDiagnostics)->Selection{
  unsafe{
   let root=GetAncestor(request.window,2);let root=if root==0{request.window}else{root};let mut source_pid=0;GetWindowThreadProcessId(root,&mut source_pid);
-  if request.pid==0||source_pid!=request.pid{return Selection::SourceMismatch;}
+  if request.pid==0||source_pid!=request.pid{return trace.reject(ProviderRejection::SourceProcessChanged);}
   if matches!(request.origin,TextOrigin::Focused|TextOrigin::Pointer(..)){
-   let foreground=GetForegroundWindow();let active=GetAncestor(foreground,2);if (if active==0{foreground}else{active})!=root{return Selection::SourceMismatch;}
-   if !focus_matches(root,request.focus){return Selection::SourceMismatch;}
-   if request.focus!=0{let focus_root=GetAncestor(request.focus,2);if request.focus!=root&&focus_root!=root{return Selection::SourceMismatch;}}
+   let foreground=GetForegroundWindow();let active=GetAncestor(foreground,2);if (if active==0{foreground}else{active})!=root{return trace.reject(ProviderRejection::NativeForegroundChanged);}
+   if !focus_matches(root,request.focus){return trace.reject(ProviderRejection::NativeFocusChanged);}
+   if request.focus!=0{let focus_root=GetAncestor(request.focus,2);if request.focus!=root&&focus_root!=root{return trace.reject(ProviderRejection::NativeFocusForeignRoot);}}
   }
-  if let TextOrigin::Clipboard(sequence)=request.origin{return super::windows_copy::read_copied(request,sequence).selection;}
+  if let TextOrigin::Clipboard(sequence)=request.origin{return super::windows_copy::read_copied(request,sequence,&mut Default::default()).selection;}
   let mut class=[0u16;64];let length=GetClassNameW(request.window,class.as_mut_ptr(),64);
   if length>0&&String::from_utf16_lossy(&class[..length as usize])=="ConsoleWindowClass"{return console_selection(request);}
   let first=match request.origin{
@@ -152,22 +183,32 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
   };
   match first{
    Ok(element)=>{
-    let original=element.clone();let result=from_element(automation,element,request.window,if matches!(request.origin,TextOrigin::Focused){request.focus}else{0});
+    let original=element.clone();let result=from_element(automation,element,request.window,if matches!(request.origin,TextOrigin::Focused){request.focus}else{0},trace);
     if matches!(request.origin,TextOrigin::Focused|TextOrigin::Pointer(..))&&result!=Selection::Protected {
-     if GetForegroundWindow()!=root||!focus_matches(root,request.focus){return Selection::SourceMismatch;}
+     if GetForegroundWindow()!=root{return trace.reject(ProviderRejection::FinalForegroundChanged);}
+     if !focus_matches(root,request.focus){return trace.reject(ProviderRejection::FinalNativeFocusChanged);}
     }
     if matches!(request.origin,TextOrigin::Focused)&&result!=Selection::Protected {
-     let current=match automation.GetFocusedElement(){Ok(value)=>value,Err(error)=>return uia_error("Current focus",error)};
-     match automation.CompareElements(&original,&current){Ok(value)if value.as_bool()=>{},Ok(_)=>return Selection::SourceMismatch,Err(error)=>return uia_error("Focus identity",error)}
+     let current=match automation.GetFocusedElement(){Ok(value)=>value,Err(error)=>return uia_error("Current focus",error,trace)};
+     match automation.CompareElements(&original,&current){Ok(value)if value.as_bool()=>{},Ok(_)=>return trace.reject(ProviderRejection::UiaFocusChanged),Err(error)=>return uia_error("Focus identity",error,trace)}
     }
     result
-   },Err(error)=>uia_error("Source element",error)
+   },Err(error)=>uia_error("Source element",error,trace)
   }
  }
 }
 
 #[cfg(test)]mod semantics_tests {
  use super::*;
+ #[test]fn provider_trace_only_attributes_the_final_source_mismatch(){
+  let mut detail=ProviderDiagnostics::default();assert_eq!(detail.reject(ProviderRejection::AncestorLimit),Selection::SourceMismatch);
+  assert_eq!(detail.native_result(Selection::SourceMismatch),Selection::SourceMismatch);
+  assert_eq!(detail.rejected_at,Some(ProviderRejection::NativeRangeSourceChanged));
+  assert!(detail.completed(&Selection::SourceMismatch).rejected_at.is_some());
+  for outcome in [Selection::Timeout,Selection::ReadError("private OS detail".into()),Selection::Protected,Selection::NoSelection,Selection::Word("private word".into())] {
+   assert!(detail.completed(&outcome).rejected_at.is_none(),"a later non-source result must not retain an earlier source rejection");
+  }
+ }
  #[test]fn read_only_document_empty_range_is_unknown_and_requires_copy_verification(){
   let result=empty_range(true,false,Some(true)).unwrap();
   assert_eq!(result,Selection::Unreported);
@@ -262,11 +303,11 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
    let request=TextRequest{pid:fixture.pid,window:fixture.rename,origin:TextOrigin::Window,focus:0};
    assert_eq!(selected_text(&automation,&request),Selection::Word("runtime".into()),"selected substring in a plain rename EDIT must be readable without copying");
    let root=automation.ElementFromHandle(HWND(fixture.root as *mut c_void)).unwrap();
-   assert_eq!(from_element(&automation,root,fixture.root,fixture.rename),Selection::Word("runtime".into()),"original native focus must work even when the UIA element is its parent");
+   assert_eq!(from_element(&automation,root,fixture.root,fixture.rename,&mut ProviderDiagnostics::default()),Selection::Word("runtime".into()),"original native focus must work even when the UIA element is its parent");
    let root=automation.ElementFromHandle(HWND(fixture.root as *mut c_void)).unwrap();
-   assert_eq!(from_element(&automation,root,fixture.root,fixture.password),Selection::Protected,"native focus must retain password protection");
+   assert_eq!(from_element(&automation,root,fixture.root,fixture.password,&mut ProviderDiagnostics::default()),Selection::Protected,"native focus must retain password protection");
    let root=automation.ElementFromHandle(HWND(fixture.other as *mut c_void)).unwrap();
-   assert_eq!(from_element(&automation,root,fixture.other,fixture.rename),Selection::SourceMismatch,"native focus cannot borrow another source root");
+   assert_eq!(from_element(&automation,root,fixture.other,fixture.rename,&mut ProviderDiagnostics::default()),Selection::SourceMismatch,"native focus cannot borrow another source root");
    let(mut start,mut end)=(0u32,0u32);SendMessageW(fixture.rename,0xb0,&mut start as *mut u32 as usize,&mut end as *mut u32 as isize);
    assert_eq!((start,end),(3,10),"reading must retain the exact original selection");
    let mut text=[0u16;128];let count=SendMessageW(fixture.rename,0xd,text.len(),text.as_mut_ptr() as isize);
@@ -317,7 +358,7 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
    assert_eq!(selected_text(&automation,&TextRequest{pid:fixture.pid.wrapping_add(1),window:fixture.edit,origin:TextOrigin::Window,focus:0}),Selection::SourceMismatch,"stale process identity must be refused");
    assert_eq!(selected_text(&automation,&TextRequest{pid:fixture.pid,window:fixture.edit,origin:TextOrigin::Focused,focus:fixture.other}),Selection::SourceMismatch,"manual capture cannot borrow an inactive or foreign focus");
    let element=automation.ElementFromHandle(HWND(fixture.edit as *mut c_void)).unwrap();
-   assert_eq!(from_element(&automation,element,fixture.other,0),Selection::SourceMismatch,"other source window must not borrow this selection");
+   assert_eq!(from_element(&automation,element,fixture.other,0,&mut ProviderDiagnostics::default()),Selection::SourceMismatch,"other source window must not borrow this selection");
    assert_eq!(read(fixture.password),Selection::Protected);
    SendMessageW(fixture.edit,0xB1,0,0);
    // This fixture is ES_READONLY and exposes a Document TextPattern. An empty

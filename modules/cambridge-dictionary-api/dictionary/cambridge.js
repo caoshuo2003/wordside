@@ -79,7 +79,9 @@ function parseCambridgeSuggestions(html, language, entry) {
 // selectors, ordering and text() behavior are retained.
 function parseCambridgePage(html) {
   const $ = loadDocument(html);
-  const word = $('.hw.dhw').first().text();
+  // Cambridge also serves complete standalone phrase entries (e.g. minutes).
+  // Only use the phrase's own title; navigation/headings cannot supply a word.
+  const word = $('.hw.dhw').first().text() || $('.phrase-di-block.dphrase-di-block > .di-title .headword.dhw').first().text();
   if (!word) {
     // Cambridge redirects an unknown word to a dictionary landing page (200).
     // A missing headword in an arbitrary or broken page is an upstream error.
@@ -107,7 +109,7 @@ function parseCambridgePage(html) {
   let assignedBodies = 0;
   const definition = blocks.map((index, element) => {
     const $element = $(element);
-    const pos = $element.closest('.pr.entry-body__el').find('.pos.dpos').first().text();
+    const pos = $element.closest('.pr.entry-body__el, .phrase-di-block.dphrase-di-block').find('.pos.dpos').first().text();
     const source = $element.closest('.pr.dictionary').attr('data-id');
     const text = $element.find('.def.ddef_d.db').text();
     const translation = $element.find('.def-body.ddef_b > span.trans.dtrans').text();

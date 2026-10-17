@@ -30,7 +30,7 @@ WordSide_<版本>-portable.zip
 THIRD-PARTY-LICENSES_<版本>.txt
 ```
 
-便携包包含主程序、同版许可和使用说明。用 `tools/check-release.ps1 -ReleaseDirectory release/v<版本>` 检查版本与大小，核对 ZIP 清单；发布说明应写清用户可用的功能、运行要求、已知限制和实际验证范围。
+便携包包含主程序、同版许可和使用说明。用 `tools/check-release.ps1 -ReleaseDirectory release/v<版本>` 检查版本与大小，核对 ZIP 清单；发布说明用简短列表说明本版修复与新增，必要时补充更新方式或已知限制；详细验证范围记录在 PR 或本地任务记录。
 
 ## 3 · 合入与打标签
 
@@ -39,25 +39,25 @@ PR 的实际 CI 通过后合入 main，确认工作树干净并创建 annotated 
 ```sh
 git switch main
 git pull --ff-only
-git tag -a v0.1.2 -m "WordSide 0.1.2"
-git push origin v0.1.2
+git tag -a v0.1.3 -m "WordSide 0.1.3"
+git push origin v0.1.3
 ```
 
-以上以 v0.1.2 为例；已有标签不覆盖、不移动，也不推送本机所有历史标签。
+以上以 v0.1.3 为例；已有标签不覆盖、不移动，也不推送本机所有历史标签。
 
 ## 4 · 发布并核对
 
 GitHub CLI 已登录且具有仓库发布权限时，可运行：
 
 ```sh
-gh release create v0.1.2 --repo caoshuo2003/wordside \
+gh release create v0.1.3 --repo caoshuo2003/wordside \
   --verify-tag --latest \
-  --title "WordSide · 词伴 0.1.2" --notes-file docs/releases/v0.1.2.md \
-  release/v0.1.2/WordSide_0.1.2.exe release/v0.1.2/WordSide_0.1.2_x64-setup.exe \
-  release/v0.1.2/WordSide_0.1.2-portable.zip release/v0.1.2/THIRD-PARTY-LICENSES_0.1.2.txt
+  --title "WordSide · 词伴 0.1.3" --notes-file docs/releases/v0.1.3.md \
+  release/v0.1.3/WordSide_0.1.3.exe release/v0.1.3/WordSide_0.1.3_x64-setup.exe \
+  release/v0.1.3/WordSide_0.1.3-portable.zip release/v0.1.3/THIRD-PARTY-LICENSES_0.1.3.txt
 ```
 
-发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。正式版使用 `--latest` 作为默认下载版本；提前试用的版本使用 `--prerelease --latest=false`。发布说明如实记录已完成的检查与已知限制。
+发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。正式版使用 `--latest` 作为默认下载版本；提前试用的版本使用 `--prerelease --latest=false`。发布说明面向使用者，不重复粘贴构建日志与测试清单。
 
 已有预发布版转正式版时，若程序和版本号保持一致，可沿用同一标签与附件：
 
