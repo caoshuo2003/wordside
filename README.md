@@ -17,7 +17,7 @@
 
 *界面预览，使用示例词条。[图片说明](docs/SCREENSHOTS.md)*
 
-**0.1.3 更新**：修复 GitHub 等网页连续取词时偶发“请重新选词”，以及 `minutes` 无法显示释义的问题。[查看本版变化](docs/releases/v0.1.3.md)
+**0.1.3 更新**：改善网页连续取词与 PowerShell 7 快捷键取词，修复 `minutes` 释义不可用的问题。[查看本版变化](docs/releases/v0.1.3.md)
 
 ## 下载与开始
 

@@ -358,38 +358,46 @@ fn released() -> bool {
     (1..256).all(|key| unsafe { GetAsyncKeyState(key) >= 0 })
 }
 // RegisterHotKey consumes the letter, so releasing Alt before that letter
-// can look like a bare Alt press to the source application. VK_E8 is currently
-// unassigned and normally has no editing action. Never release real modifiers
-// or send Escape. Only the hook thread sends/repairs this marked key.
-// https://github.com/AutoHotkey/AutoHotkeyDocs/blob/v2/docs/lib/A_MenuMaskKey.htm
+// can look like a bare Alt press to the source application. Use a modifier-only
+// pair: an unassigned non-modifier (such as E8) still clears terminal selections.
+// Only the hook thread sends/repairs this marked left Ctrl. Never release a
+// physical Ctrl or send Escape to dismiss a source application's menu.
 static MENU_KEY_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-fn recover_menu_key(pending:&std::sync::atomic::AtomicBool,send_up:impl FnOnce()->u32)->bool {
+fn recover_menu_key(pending:&std::sync::atomic::AtomicBool,physical_left_up:bool,send_up:impl FnOnce()->u32)->bool {
     use std::sync::atomic::Ordering;
     if !pending.load(Ordering::SeqCst) {return true;}
-    if send_up()!=1 {return false;}
+    if !physical_left_up || send_up()!=1 {return false;}
     pending.store(false,Ordering::SeqCst);true
 }
-fn complete_menu_pair(sent:u32,pending:&std::sync::atomic::AtomicBool,send_up:impl FnOnce()->u32)->bool {
+fn complete_menu_pair(sent:u32,pending:&std::sync::atomic::AtomicBool,physical_left_up:bool,send_up:impl FnOnce()->u32)->bool {
     if sent==1 {
         pending.store(true,std::sync::atomic::Ordering::SeqCst);
-        recover_menu_key(pending,send_up);
+        recover_menu_key(pending,physical_left_up,send_up);
     }
     sent==2
 }
 fn send_menu_up()->u32 {
-    let up=key(0xe8,true,false);
+    let up=key(0xA2,true,false);
     unsafe {SendInput(1,&up,std::mem::size_of::<Input>() as i32)}
 }
-pub(super) fn recover_menu_mask()->bool {recover_menu_key(&MENU_KEY_PENDING,send_menu_up)}
+fn physical_menu_key_released()->bool {
+    matches!(super::input::physical_controls_released(),Some((true,_)))
+}
+pub(super) fn recover_menu_mask()->bool {
+    recover_menu_key(&MENU_KEY_PENDING,physical_menu_key_released(),send_menu_up)
+}
 pub(super) fn mask_alt_menu(request: &TextRequest)->bool {
     if !recover_menu_mask() || !source_current(request) || unsafe { GetAsyncKeyState(0x12) } >= 0 {return false;}
-    // A remapper may already use this unassigned key. It is not ours to release.
-    if unsafe { GetAsyncKeyState(0xe8) } < 0 {return false;}
-    let inputs=[key(0xe8,false,false),key(0xe8,true,false)];
+    // The physical hook excludes our tagged events. Check both Ctrl sides and
+    // the OS sample before introducing any new modifier pair.
+    if super::input::physical_controls_released()!=Some((true,true))
+        || [0x11,0xA2,0xA3].into_iter().any(|code|unsafe{GetAsyncKeyState(code)}<0) {return false;}
+    let inputs=[key(0xA2,false,false),key(0xA2,true,false)];
     let sent=unsafe {SendInput(inputs.len() as u32,inputs.as_ptr(),std::mem::size_of::<Input>() as i32)};
-    // Keep a failed own key-up pending so the input thread can retry it on its
-    // next refresh. A denied SendInput must not silently strand every lookup.
-    complete_menu_pair(sent,&MENU_KEY_PENDING,send_menu_up)
+    // A partial send retains its own up for retry, but must wait if the user
+    // physically pressed left Ctrl in the meantime. Synthetic state alone
+    // cannot make that decision: our own partial down also sets the OS bit.
+    complete_menu_pair(sent,&MENU_KEY_PENDING,physical_menu_key_released(),send_menu_up)
 }
 fn send_copy() -> bool {
     // Ctrl+Insert is the standard Windows copy chord and never sends Ctrl+C
@@ -551,15 +559,30 @@ mod tests {
         use std::sync::atomic::{AtomicBool,Ordering};
         for sent in [0,2] {
             let pending=AtomicBool::new(false);
-            assert_eq!(complete_menu_pair(sent,&pending,||panic!("no partial key to release")),sent==2);
+            assert_eq!(complete_menu_pair(sent,&pending,true,||panic!("no partial key to release")),sent==2);
             assert!(!pending.load(Ordering::SeqCst));
         }
         let pending=AtomicBool::new(false);
-        assert!(!complete_menu_pair(1,&pending,||0));assert!(pending.load(Ordering::SeqCst));
-        assert!(!recover_menu_key(&pending,||0));assert!(pending.load(Ordering::SeqCst));
-        assert!(recover_menu_key(&pending,||1));assert!(!pending.load(Ordering::SeqCst));
-        assert!(recover_menu_key(&pending,||panic!("never release a key we did not press")));
-        assert!(!complete_menu_pair(1,&pending,||1));assert!(!pending.load(Ordering::SeqCst));
+        assert!(!complete_menu_pair(1,&pending,true,||0));assert!(pending.load(Ordering::SeqCst));
+        assert!(!recover_menu_key(&pending,true,||0));assert!(pending.load(Ordering::SeqCst));
+        assert!(recover_menu_key(&pending,true,||1));assert!(!pending.load(Ordering::SeqCst));
+        assert!(recover_menu_key(&pending,true,||panic!("never release a key we did not press")));
+        assert!(!complete_menu_pair(1,&pending,true,||1));assert!(!pending.load(Ordering::SeqCst));
+    }
+
+
+    #[test] fn partial_menu_modifier_waits_for_the_users_physical_key_release() {
+        use std::sync::atomic::{AtomicBool,Ordering};
+        let pending=AtomicBool::new(false);
+        assert!(!complete_menu_pair(1,&pending,false,||panic!("do not release the user's left Ctrl")));
+        assert!(pending.load(Ordering::SeqCst));
+        assert!(!recover_menu_key(&pending,false,||panic!("refresh must also respect a real held Ctrl")));
+        assert!(pending.load(Ordering::SeqCst));
+        assert!(!recover_menu_key(&pending,true,||0),"denied injection must remain retryable");
+        assert!(pending.load(Ordering::SeqCst));
+        assert!(recover_menu_key(&pending,true,||1));
+        assert!(!pending.load(Ordering::SeqCst));
+        assert!(recover_menu_key(&pending,false,||panic!("no synthetic key is pending")));
     }
 
     use super::*;

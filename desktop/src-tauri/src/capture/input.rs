@@ -66,6 +66,12 @@ impl HeldKeys {
 }
 struct Context { shortcut_press: Option<u32>, repair_since: Option<Instant>, held: HeldKeys, activity: Activity, sender: SyncSender<Event>, capture_thread: u32, lost: Arc<AtomicBool>, modifiers: Modifiers, generation: Arc<AtomicU64>, shortcut: Arc<AtomicU64> }
 thread_local! { static CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) }; }
+// Only the hook's physical history can distinguish a real Ctrl press from
+// our tagged menu mask. Unknown history never authorizes releasing a key.
+pub(super) fn physical_controls_released() -> Option<(bool,bool)> {
+    CONTEXT.with(|cell| cell.try_borrow().ok().and_then(|context|context.as_ref()
+        .map(|context|(!context.held.keys[0xA2],!context.held.keys[0xA3]))))
+}
 fn root(window: isize) -> isize { let root = unsafe { GetAncestor(window, 2) }; if root == 0 { window } else { root } }
 fn binding_matches(binding:u64,code:u32,modifiers:u32)->bool {
     binding != 0 && (binding & 0xffff) == (u64::from(code) | (u64::from(modifiers) << 8))
@@ -253,6 +259,22 @@ impl Drop for Observer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn menu_mask_physical_control_history_is_side_specific_and_unknown_is_not_up() {
+        assert_eq!(physical_controls_released(),None);
+        let (sender,_)=sync_channel(1);
+        let context=Context{shortcut_press:None,repair_since:None,held:HeldKeys::default(),activity:Activity::default(),
+            sender,capture_thread:0,lost:Arc::new(AtomicBool::new(false)),modifiers:Modifiers::default(),
+            generation:Arc::new(AtomicU64::new(0)),shortcut:Arc::new(AtomicU64::new(0))};
+        CONTEXT.with(|cell|*cell.borrow_mut()=Some(context));
+        assert_eq!(physical_controls_released(),Some((true,true)));
+        for (code,down,expected) in [(0xA3,true,(true,false)),(0x11,true,(false,false)),
+            (0xA3,false,(false,true)),(0xA2,false,(true,true))] {
+            CONTEXT.with(|cell|{track_edge(cell.borrow_mut().as_mut().unwrap(),code,down);});
+            assert_eq!(physical_controls_released(),Some(expected));
+        }
+        CONTEXT.with(|cell|*cell.borrow_mut()=None);
+        assert_eq!(physical_controls_released(),None);
+    }
     #[test] fn only_our_registered_alt_chord_needs_menu_masking_and_tagged_input_is_ignored() {
         assert!(needs_alt_mask(1));assert!(needs_alt_mask(1|4));
         for modifiers in [0,2,4,8,1|2,1|2|4] {assert!(!needs_alt_mask(modifiers));}
