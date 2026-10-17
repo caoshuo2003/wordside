@@ -5,7 +5,7 @@ use std::time::Duration;
 #[derive(Default)]#[repr(C)]struct Msg{window:isize,message:u32,wparam:usize,lparam:isize,time:u32,x:i32,y:i32,private:u32}
 #[derive(Default,Clone,Copy)]#[repr(C)]struct Rect{left:i32,top:i32,right:i32,bottom:i32}
 #[derive(Default)]#[repr(C)]struct GuiInfo{size:u32,flags:u32,active:isize,focus:isize,capture:isize,menu:isize,moving:isize,caret:isize,rect:Rect}
-#[derive(Clone,Copy)]pub struct Trigger{pub window:isize,pub focus:isize,pub x:i32,pub y:i32}
+#[derive(Clone,Copy)]pub struct Trigger{pub window:isize,pub pid:u32,pub focus:isize,pub x:i32,pub y:i32}
 #[link(name="user32")]extern "system"{
  fn RegisterHotKey(window:isize,id:i32,modifiers:u32,key:u32)->i32;fn UnregisterHotKey(window:isize,id:i32)->i32;
  fn PeekMessageW(message:*mut Msg,window:isize,min:u32,max:u32,remove:u32)->i32;fn PostThreadMessageW(thread:u32,message:u32,wparam:usize,lparam:isize)->i32;
@@ -44,13 +44,13 @@ impl Registry for SystemRegistry{
  fn register(&self,id:i32,key:&Hotkey)->Result<(),u32>{if unsafe{RegisterHotKey(0,id,key.modifiers|0x4000,key.key)}!=0{Ok(())}else{Err(unsafe{GetLastError()})}}
  fn unregister(&self,id:i32){unsafe{UnregisterHotKey(0,id);}}
 }
-pub struct Driver{registry:Box<dyn Registry>,control:Arc<Control>,commands:Receiver<Command>,active:Option<Registered>,pending:Option<Pending>,serial:u64}
+pub struct Driver{registry:Box<dyn Registry>,control:Arc<Control>,commands:Receiver<Command>,active:Option<Registered>,pending:Option<Pending>,serial:u64,binding_revision:u64}
 impl Driver{
  pub fn new(control:Arc<Control>,initial:Option<Hotkey>)->Self{Self::with_registry(control,initial,Box::new(SystemRegistry))}
  fn with_registry(control:Arc<Control>,initial:Option<Hotkey>,registry:Box<dyn Registry>)->Self{
   unsafe{let mut message=Msg::default();PeekMessageW(&mut message,0,0,0,0);}
   let(tx,commands)=sync_channel(8);*control.endpoint.lock().unwrap()=Some((tx,unsafe{GetCurrentThreadId()}));
-  let mut driver=Self{registry,control,commands,active:None,pending:None,serial:0};
+  let mut driver=Self{registry,control,commands,active:None,pending:None,serial:0,binding_revision:0};
   match driver.prepare(initial){Ok(token)=>{let _=driver.finish(token,true);},Err(error)=>{driver.control.status.lock().unwrap().error=Some(error);}}
   driver
  }
@@ -69,12 +69,13 @@ impl Driver{
  fn finish(&mut self,token:u64,commit:bool)->Result<(),String>{
   if !self.pending.as_ref().is_some_and(|p|p.token==token){return Err("快捷键设置已过期，请重新保存。".into());}
   let pending=self.pending.take().unwrap();
-  if commit&&!pending.unchanged{if let Some(old)=self.active.take(){self.registry.unregister(old.id);}self.active=pending.next;}
+  if commit&&!pending.unchanged{self.binding_revision=self.binding_revision.wrapping_add(1);if let Some(old)=self.active.take(){self.registry.unregister(old.id);}self.active=pending.next;}
   else if let Some(next)=pending.next{self.registry.unregister(next.id);}
   if commit{self.update_status();}Ok(())
  }
- pub fn input_signature(&self)->u64{self.active.as_ref().map(|value|u64::from(value.key.key)|(u64::from(value.key.modifiers)<<32)).unwrap_or(0)}
- pub fn matches_input(&self,key:u32,modifiers:u32)->bool{self.active.as_ref().is_some_and(|value|value.key.key==key&&value.key.modifiers==modifiers)}
+ // One atomic snapshot: VK, modifier mask and registration revision.
+ pub fn input_binding(&self)->u64{self.active.as_ref().map(|value|(self.binding_revision<<16)|(u64::from(value.key.modifiers)<<8)|u64::from(value.key.key)).unwrap_or(0)}
+ #[cfg(test)]pub fn matches_input(&self,key:u32,modifiers:u32)->bool{self.active.as_ref().is_some_and(|value|value.key.key==key&&value.key.modifiers==modifiers)}
  pub fn drain(&mut self)->Vec<Trigger>{
   while let Ok(command)=self.commands.try_recv(){match command{
    Command::Prepare(key,reply)=>{let result=self.prepare(key);let token=result.as_ref().ok().copied();if reply.send(result).is_err(){if let Some(token)=token{let _=self.finish(token,false);}}},
@@ -85,7 +86,7 @@ impl Driver{
    if message.wparam!=active.id as usize||((message.lparam as u32>>16)&0xffff)!=active.key.key||message.lparam as u32&0xf!=active.key.modifiers{continue;}
    let window=GetForegroundWindow();let mut point=Point::default();GetCursorPos(&mut point);
    let mut pid=0;let thread=GetWindowThreadProcessId(window,&mut pid);let mut gui=GuiInfo{size:std::mem::size_of::<GuiInfo>() as u32,..GuiInfo::default()};
-   let focus=if GetGUIThreadInfo(thread,&mut gui)!=0{gui.focus}else{0};events.push(Trigger{window,focus,x:point.x,y:point.y});
+   let focus=if GetGUIThreadInfo(thread,&mut gui)!=0{gui.focus}else{0};events.push(Trigger{window,pid,focus,x:point.x,y:point.y});
   }}events
  }
  pub fn wait(timeout:u64){unsafe{MsgWaitForMultipleObjectsEx(0,std::ptr::null(),timeout.min(u64::from(u32::MAX)) as u32,0x04ff,0x0004);}}

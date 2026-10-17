@@ -6,17 +6,23 @@ pub struct Snapshot {
     pub mouse_down: bool, pub inside_popup: bool, pub focus: Focus,
 }
 #[derive(Default)]
-pub struct Dismissal { away_since: Option<Instant> }
+pub struct Dismissal { away_since: Option<Instant>, hide_pending: bool }
 impl Dismissal {
+    // Main-thread hiding is asynchronous. Keep that transition latched even if
+    // another input batch observes the old native visibility before it runs.
+    pub fn showing(&mut self) { self.hide_pending=false; self.away_since=None; }
     pub fn update(&mut self, now: Instant, state: Snapshot) -> bool {
-        if !state.visible || state.pinned { self.away_since = None; return false; }
-        if state.press_started && !state.inside_popup { self.away_since = None; return true; }
+        if !state.visible { self.hide_pending=false; self.away_since=None; return false; }
+        if state.pinned || self.hide_pending { self.away_since = None; return false; }
+        if state.press_started && !state.inside_popup { self.away_since = None; self.hide_pending=true; return true; }
         // Activation can temporarily yield NULL; it does not prove an outside click.
         if state.focus != Focus::Other || (state.mouse_down && state.inside_popup) {
             self.away_since = None; return false;
         }
         let since = *self.away_since.get_or_insert(now);
-        now.saturating_duration_since(since) >= Duration::from_millis(160)
+        let hide=now.saturating_duration_since(since) >= Duration::from_millis(160);
+        if hide { self.hide_pending=true; }
+        hide
     }
 }
 #[cfg(windows)]
@@ -63,6 +69,14 @@ pub fn belongs_to_window(window: isize, target: isize) -> bool {
         let mut pin=state(Focus::Other);pin.pinned=true;pin.press_started=true;pin.inside_popup=false;
         assert!(!policy.update(now,pin));assert!(!policy.update(now+Duration::from_secs(1),state(Focus::Other)));
         let mut hidden=state(Focus::Other);hidden.visible=false;assert!(!policy.update(now+Duration::from_secs(2),hidden));
+    }
+    #[test] fn capture_race_a_new_card_rearms_dismissal_even_if_hidden_visibility_was_not_polled() {
+        let mut policy=Dismissal::default(); let at=Instant::now();
+        let click=||Snapshot{visible:true,pinned:false,press_started:true,mouse_down:true,inside_popup:false,focus:Focus::Source};
+        assert!(policy.update(at,click()));
+        assert!(!policy.update(at+Duration::from_millis(20),click()));
+        policy.showing();
+        assert!(policy.update(at+Duration::from_millis(90),click()));
     }
     #[cfg(windows)] #[test] fn hidden_native_windows_cover_child_and_owner_relationships() {
         // No WS_VISIBLE, ShowWindow, SetFocus or input. Each HWND is destroyed on this thread.

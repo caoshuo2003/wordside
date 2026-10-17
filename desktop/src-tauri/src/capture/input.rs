@@ -1,4 +1,5 @@
-//! Read-only, bounded input observation. The observer does not intercept or synthesize input.
+//! Bounded input observation. Ordinary input is never intercepted. A registered
+//! Alt shortcut uses a tagged, non-character event to prevent menu activation.
 //! Hooks use their own message thread so clipboard/provider work cannot block them.
 use super::timing::Activity;
 use std::{cell::RefCell, sync::{Arc, atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering}, mpsc::{sync_channel, Receiver, SyncSender}}, thread::JoinHandle, time::{Duration, Instant}};
@@ -8,7 +9,7 @@ pub struct Point { pub x: i32, pub y: i32 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind { Down, Up, Other, Key { code: u32, modifiers: u32 } }
 #[derive(Clone, Copy)]
-pub struct Event { pub kind: Kind, pub window: isize, pub point: Point, pub sequence: u32, pub shift: bool, pub at: Instant, pub generation: u64 }
+pub struct Event { pub kind: Kind, pub window: isize, pub point: Point, pub sequence: u32, pub shift: bool, pub at: Instant, pub generation: u64, pub shortcut: Option<(u64,super::compatibility::Source)> }
 #[repr(C)]
 struct MousePacket { point: Point, data: u32, flags: u32, time: u32, extra: usize }
 #[repr(C)]
@@ -16,6 +17,8 @@ struct KeyPacket { code: u32, scan: u32, flags: u32, time: u32, extra: usize }
 #[derive(Default)]
 #[repr(C)]
 struct Message { window: isize, message: u32, wparam: usize, lparam: isize, time: u32, x: i32, y: i32, private: u32 }
+#[derive(Default)] #[repr(C)] struct FocusRect {left:i32,top:i32,right:i32,bottom:i32}
+#[derive(Default)] #[repr(C)] struct GuiInfo {size:u32,flags:u32,active:isize,focus:isize,capture:isize,menu:isize,moving:isize,caret:isize,rect:FocusRect}
 #[link(name="user32")]
 extern "system" {
     fn SetWindowsHookExW(kind: i32, callback: unsafe extern "system" fn(i32, usize, isize) -> isize, module: isize, thread: u32) -> isize;
@@ -25,6 +28,8 @@ extern "system" {
     fn PeekMessageW(message: *mut Message, window: isize, min: u32, max: u32, remove: u32) -> i32;
     fn PostThreadMessageW(thread: u32, message: u32, wparam: usize, lparam: isize) -> i32;
     fn GetForegroundWindow() -> isize;
+    fn GetWindowThreadProcessId(window:isize,pid:*mut u32)->u32;
+    fn GetGUIThreadInfo(thread:u32,info:*mut GuiInfo)->i32;
     fn WindowFromPoint(point: Point) -> isize;
     fn GetAncestor(window: isize, flags: u32) -> isize;
     fn GetCursorPos(point: *mut Point) -> i32;
@@ -62,17 +67,29 @@ impl HeldKeys {
 struct Context { shortcut_press: Option<u32>, repair_since: Option<Instant>, held: HeldKeys, activity: Activity, sender: SyncSender<Event>, capture_thread: u32, lost: Arc<AtomicBool>, modifiers: Modifiers, generation: Arc<AtomicU64>, shortcut: Arc<AtomicU64> }
 thread_local! { static CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) }; }
 fn root(window: isize) -> isize { let root = unsafe { GetAncestor(window, 2) }; if root == 0 { window } else { root } }
-fn key_generation(context: &Context, code: u32, modifiers: u32) -> u64 {
-    let signature = u64::from(code) | (u64::from(modifiers) << 32);
-    if context.shortcut.load(Ordering::SeqCst) == signature { context.generation.load(Ordering::SeqCst) }
-    else { context.generation.fetch_add(1, Ordering::SeqCst).wrapping_add(1) }
+fn binding_matches(binding:u64,code:u32,modifiers:u32)->bool {
+    binding != 0 && (binding & 0xffff) == (u64::from(code) | (u64::from(modifiers) << 8))
+}
+fn advance_generation(context:&Context,shortcut:bool)->u64 {
+    if shortcut {context.generation.load(Ordering::SeqCst)}
+    else {context.generation.fetch_add(1,Ordering::SeqCst).wrapping_add(1)}
+}
+#[cfg(test)] fn key_generation(context:&Context,code:u32,modifiers:u32)->u64 {
+    advance_generation(context,binding_matches(context.shortcut.load(Ordering::SeqCst),code,modifiers))
+}
+fn needs_alt_mask(modifiers:u32)->bool {modifiers & 1 != 0 && modifiers & 2 == 0}
+unsafe fn shortcut_source(window:isize)->super::compatibility::Source {
+    let mut pid=0;let thread=GetWindowThreadProcessId(window,&mut pid);
+    let mut gui=GuiInfo{size:std::mem::size_of::<GuiInfo>() as u32,..Default::default()};
+    let focus=if thread!=0&&GetGUIThreadInfo(thread,&mut gui)!=0 {gui.focus}else{0};
+    super::compatibility::Source{window,pid,focus}
 }
 fn track_edge(context: &mut Context, code: u32, down: bool) -> bool {
     let changed=context.held.update(code,down);
     if changed { context.repair_since=None; context.activity.changed(context.held.count!=0); }
     changed
 }
-fn key_transition(context:&mut Context,code:u32,down:bool,alt_flag:bool)->Option<(u32,u64)> {
+fn key_transition(context:&mut Context,code:u32,down:bool,alt_flag:bool)->Option<(u32,u64,Option<u64>)> {
     let changed=track_edge(context,code,down);
     let modifier=context.modifiers.update(code,down);
     if !down && context.shortcut_press==Some(code) {context.shortcut_press=None;}
@@ -81,9 +98,10 @@ fn key_transition(context:&mut Context,code:u32,down:bool,alt_flag:bool)->Option
     // released first. Ordinary editing repeats still invalidate old selections.
     if !changed && context.shortcut_press==Some(code) {return None;}
     let modifiers=context.modifiers.mask()|u32::from(alt_flag);
-    let signature=u64::from(code)|(u64::from(modifiers)<<32);
-    if context.shortcut.load(Ordering::SeqCst)==signature {context.shortcut_press=Some(code);}
-    Some((modifiers,key_generation(context,code,modifiers)))
+    let binding=context.shortcut.load(Ordering::SeqCst);
+    let shortcut=binding_matches(binding,code,modifiers);
+    if shortcut {context.shortcut_press=Some(code);}
+    Some((modifiers,advance_generation(context,shortcut),shortcut.then_some(binding)))
 }
 // A missed keyup (or a key already held during hook startup) must not leave
 // every later hotkey waiting forever. Only repair to UP, on the hook thread,
@@ -111,7 +129,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) ->
                 if let Some(kind)=kind {
                     let window=if kind==Kind::Down {WindowFromPoint(packet.point)} else {GetForegroundWindow()};
                     let generation=context.generation.fetch_add(1,Ordering::SeqCst).wrapping_add(1);
-                    send(context,Event{kind,window:root(window),point:packet.point,sequence:GetClipboardSequenceNumber(),shift:context.modifiers.mask()&4!=0,at:Instant::now(),generation});
+                    send(context,Event{kind,window:root(window),point:packet.point,sequence:GetClipboardSequenceNumber(),shift:context.modifiers.mask()&4!=0,at:Instant::now(),generation,shortcut:None});
                 }
             } } });
         }
@@ -129,14 +147,25 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
             if super::copy_policy::own_input(packet.flags, packet.extra) {
                 return CallNextHookEx(0, code, wparam, lparam);
             }
+            let mut menu_mask=None;
             CONTEXT.with(|cell| { if let Ok(mut context) = cell.try_borrow_mut() { if let Some(context) = context.as_mut() {
                 let observed=key_transition(context,packet.code,down,packet.flags&0x20!=0);
                 PostThreadMessageW(context.capture_thread,WAKE,0,0);
-                if let Some((modifiers,generation))=observed {
+                if let Some((modifiers,generation,binding))=observed {
                     let mut point=Point::default(); GetCursorPos(&mut point);
-                    send(context,Event{kind:Kind::Key{code:packet.code,modifiers},window:root(GetForegroundWindow()),point,sequence:GetClipboardSequenceNumber(),shift:modifiers&4!=0,at:Instant::now(),generation});
+                    let window=root(GetForegroundWindow());
+                    let shortcut=binding.map(|binding|(binding,shortcut_source(window)));
+                    if needs_alt_mask(modifiers) {menu_mask=shortcut.map(|(_,source)|source).filter(|source|super::policy::permits_source(source.pid,std::process::id()));}
+                    send(context,Event{kind:Kind::Key{code:packet.code,modifiers},window,point,sequence:GetClipboardSequenceNumber(),shift:modifiers&4!=0,at:Instant::now(),generation,shortcut});
                 }
             } } });
+            // Do this on the input edge, while Alt is still held. Waiting for
+            // the lookup worker is too late: the source menu may already own
+            // keyboard focus. Our tagged pair is excluded above and cannot
+            // invalidate the original selection or recurse into this branch.
+            if let Some(source)=menu_mask {
+                let _=super::windows_copy::mask_alt_menu(&super::windows_text::TextRequest{pid:source.pid,window:source.window,focus:source.focus,origin:super::windows_text::TextOrigin::Focused});
+            }
         }
     }
     CallNextHookEx(0, code, wparam, lparam)
@@ -177,6 +206,7 @@ impl Observer {
                 let _ = ready.send(Ok(thread));
                 while !hook_stop.load(Ordering::SeqCst) && GetMessageW(&mut message, 0, 0, 0) > 0 {
                     if message.message==REFRESH {
+                        super::windows_copy::recover_menu_mask();
                         CONTEXT.with(|cell| { if let Some(context)=cell.borrow_mut().as_mut() {
                             if context.held.count!=0 {
                                 let all_up=(1..256).all(|key|GetAsyncKeyState(key)>=0);
@@ -186,6 +216,9 @@ impl Observer {
                     }
                 }
             }
+            // Make one last bounded attempt to release our own incomplete menu
+            // pair before removing the observer that normally retries it.
+            super::windows_copy::recover_menu_mask();
             drop(keyboard); drop(mouse); CONTEXT.with(|cell| *cell.borrow_mut() = None);
         });
         match result.recv_timeout(Duration::from_secs(2)) {
@@ -220,11 +253,17 @@ impl Drop for Observer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn only_our_registered_alt_chord_needs_menu_masking_and_tagged_input_is_ignored() {
+        assert!(needs_alt_mask(1));assert!(needs_alt_mask(1|4));
+        for modifiers in [0,2,4,8,1|2,1|2|4] {assert!(!needs_alt_mask(modifiers));}
+        assert!(super::super::copy_policy::own_input(0x10,super::super::copy_policy::INPUT_MARKER));
+        assert!(!super::super::copy_policy::own_input(0x10,0));
+    }
     #[test] fn both_mouse_edges_survive_one_delayed_capture_poll() {
         let (sender, events) = sync_channel(CAPACITY); let lost = Arc::new(AtomicBool::new(false));
         let context = Context { shortcut_press: None, repair_since: None, held: HeldKeys::default(), activity: Activity::default(), sender, capture_thread: 0, lost: lost.clone(), modifiers: Modifiers::default(), generation: Arc::new(AtomicU64::new(0)), shortcut: Arc::new(AtomicU64::new(0)) };
         let now = Instant::now();
-        let down = Event { kind: Kind::Down, window: 20, point: Point { x: 10, y: 20 }, sequence: 7, shift: false, at: now, generation: 1 };
+        let down = Event { kind: Kind::Down, window: 20, point: Point { x: 10, y: 20 }, sequence: 7, shift: false, at: now, generation: 1, shortcut:None };
         let up = Event { kind: Kind::Up, point: Point { x: 50, y: 20 }, at: now + Duration::from_millis(15), ..down };
         send(&context, down); send(&context, up);
         let observed: Vec<_> = events.try_iter().collect();
@@ -234,38 +273,38 @@ mod tests {
     #[test] fn overflow_is_bounded_and_explicitly_marks_lost_selection_evidence() {
         let (sender, events) = sync_channel(CAPACITY); let lost = Arc::new(AtomicBool::new(false));
         let context = Context { shortcut_press: None, repair_since: None, held: HeldKeys::default(), activity: Activity::default(), sender, capture_thread: 0, lost: lost.clone(), modifiers: Modifiers::default(), generation: Arc::new(AtomicU64::new(0)), shortcut: Arc::new(AtomicU64::new(0)) };
-        let event = Event { kind: Kind::Down, window: 20, point: Point::default(), sequence: 7, shift: false, at: Instant::now(), generation: 1 };
+        let event = Event { kind: Kind::Down, window: 20, point: Point::default(), sequence: 7, shift: false, at: Instant::now(), generation: 1, shortcut:None };
         for _ in 0..CAPACITY + 10 { send(&context, event); }
         assert_eq!(events.try_iter().count(), CAPACITY); assert!(lost.swap(false, Ordering::SeqCst));
     }
     #[test] fn own_shortcut_preserves_the_snapshot_but_other_keys_invalidate_a_queued_display() {
         let (sender, _) = sync_channel(CAPACITY);
         let generation = Arc::new(AtomicU64::new(10));
-        let shortcut = Arc::new(AtomicU64::new(0x44 | (1u64 << 32)));
+        let shortcut = Arc::new(AtomicU64::new(0x44 | (1u64 << 8)));
         let context = Context { shortcut_press: None, repair_since: None, held: HeldKeys::default(), activity: Activity::default(), sender, capture_thread: 0, lost: Arc::new(AtomicBool::new(false)), modifiers: Modifiers::default(), generation: generation.clone(), shortcut: shortcut.clone() };
         assert_eq!(key_generation(&context, 0x44, 1), 10, "Alt+D itself must not discard the selected word");
         let display_generation = generation.load(Ordering::SeqCst);
         assert_eq!(key_generation(&context, 0x25, 0), 11, "arrow key changes selection");
         assert_ne!(generation.load(Ordering::SeqCst), display_generation);
-        shortcut.store(0x41 | (3u64 << 32), Ordering::SeqCst);
+        shortcut.store(0x41 | (3u64 << 8), Ordering::SeqCst);
         assert_eq!(key_generation(&context, 0x41, 3), 11);
         assert_eq!(key_generation(&context, 0x44, 1), 12, "the old shortcut becomes normal input after reconfiguration");
     }
     #[test] fn held_hotkey_letter_survives_modifier_release_and_typematic_repeat() {
         let(sender,_)=sync_channel(CAPACITY);
-        let mut context=Context{shortcut_press:None,repair_since:None,held:HeldKeys::default(),activity:Activity::default(),sender,capture_thread:0,lost:Arc::new(AtomicBool::new(false)),modifiers:Modifiers::default(),generation:Arc::new(AtomicU64::new(10)),shortcut:Arc::new(AtomicU64::new(0x44|(1u64<<32)))};
+        let mut context=Context{shortcut_press:None,repair_since:None,held:HeldKeys::default(),activity:Activity::default(),sender,capture_thread:0,lost:Arc::new(AtomicBool::new(false)),modifiers:Modifiers::default(),generation:Arc::new(AtomicU64::new(10)),shortcut:Arc::new(AtomicU64::new(0x44|(1u64<<8)))};
         assert!(key_transition(&mut context,0xA4,true,false).is_none()); assert!(context.activity.stamp().is_none());
-        assert_eq!(key_transition(&mut context,0x44,true,true),Some((1,10)));
+        assert_eq!(key_transition(&mut context,0x44,true,true),Some((1,10,Some(0x144))));
         assert!(key_transition(&mut context,0xA4,false,false).is_none()); assert!(context.activity.stamp().is_none(),"D is still physically down");
         assert!(key_transition(&mut context,0x44,true,false).is_none(),"repeat after releasing Alt must not invalidate the one request");
         assert_eq!(context.generation.load(Ordering::SeqCst),10);
         assert!(key_transition(&mut context,0x44,false,false).is_none()); assert!(context.activity.stamp().is_some());
-        assert_eq!(key_transition(&mut context,0x25,true,false),Some((0,11)),"a real new arrow press still invalidates selection");
-        assert_eq!(key_transition(&mut context,0x25,true,false),Some((0,12)),"ordinary editing repeats still invalidate a newly queued lookup");
+        assert_eq!(key_transition(&mut context,0x25,true,false),Some((0,11,None)),"a real new arrow press still invalidates selection");
+        assert_eq!(key_transition(&mut context,0x25,true,false),Some((0,12,None)),"ordinary editing repeats still invalidate a newly queued lookup");
     }
     #[test] fn missed_keyup_recovers_without_a_second_hotkey_or_releasing_real_input() {
         let(sender,_)=sync_channel(CAPACITY);
-        let mut context=Context{shortcut_press:None,repair_since:None,held:HeldKeys::default(),activity:Activity::default(),sender,capture_thread:0,lost:Arc::new(AtomicBool::new(false)),modifiers:Modifiers::default(),generation:Arc::new(AtomicU64::new(10)),shortcut:Arc::new(AtomicU64::new(0x44|(1u64<<32)))};
+        let mut context=Context{shortcut_press:None,repair_since:None,held:HeldKeys::default(),activity:Activity::default(),sender,capture_thread:0,lost:Arc::new(AtomicBool::new(false)),modifiers:Modifiers::default(),generation:Arc::new(AtomicU64::new(10)),shortcut:Arc::new(AtomicU64::new(0x44|(1u64<<8)))};
         key_transition(&mut context,0xA4,true,false); key_transition(&mut context,0x44,true,true);
         let now=Instant::now();
         assert!(!repair_released(&mut context,false,now),"held physical input cannot be repaired away");
