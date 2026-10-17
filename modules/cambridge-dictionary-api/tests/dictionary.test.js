@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const { parseCambridgePage, createCambridge, buildDictionaryUrl } = require('../dictionary/cambridge');
 const { createLookup } = require('../lookup');
 const { MemoryCache } = require('../lib/cache');
-const { html, landing } = require('./fixture');
+const { html, landing, phraseHtml, phraseEntry } = require('./fixture');
 const { upstreamResult } = require('./upstream-oracle');
 
 test('package entry exports the local lookup module without starting a service', () => {
@@ -122,4 +122,22 @@ test('complete bare English definitions are retained without losing translations
     assert.throws(() => parseCambridgePage(page.replace(bare, bare.replace('</div></div>', '<div class="def-body ddef_b"></div><div class="def-body ddef_b"></div></div></div>'))), { status: 502, code: 'INVALID_CAMBRIDGE_PAGE' });
     assert.throws(() => parseCambridgePage(page.slice(0, -7)), { status: 502, code: 'INVALID_CAMBRIDGE_PAGE' });
   } finally { lookup.close(); }
+});
+
+
+test('standalone phrase pages retain their heading, grammatical label, translations and all examples', () => {
+  assert.deepEqual(JSON.parse(JSON.stringify(parseCambridgePage(phraseHtml))), phraseEntry);
+  // A normal headword keeps priority on a mixed dictionary page.
+  const mixed = html.replace('</body>', phraseHtml.match(/<body>([\s\S]*)<\/body>/)[1] + '</body>');
+  const entry = JSON.parse(JSON.stringify(parseCambridgePage(mixed)));
+  assert.equal(entry.word, 'example');
+  assert.equal(entry.definition.length, 3);
+  assert.deepEqual(entry.definition[2], { ...phraseEntry.definition[0], id: 2 });
+});
+test('phrase headings do not excuse missing or unassigned definition content', () => {
+  for (const page of [phraseHtml.slice(0, -7), phraseHtml.replace('class="def ddef_d db"', 'class="broken"'),
+    phraseHtml.replace('class="eg deg"', 'class="broken"'), phraseHtml.replace('class="phrase-di-block dphrase-di-block"', 'class="broken"'),
+    phraseHtml.replace('class="di-title"', 'class="broken"')]) {
+    assert.throws(() => parseCambridgePage(page), { status: 502, code: 'INVALID_CAMBRIDGE_PAGE' });
+  }
 });

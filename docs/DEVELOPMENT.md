@@ -52,7 +52,7 @@ Linux 可运行 JS/TS 检查与浏览器预览。预览使用示例词条，不�
 
 ```text
 desktop/src-tauri/target/release/wordside.exe
-desktop/src-tauri/target/release/bundle/nsis/WordSide_0.1.2_x64-setup.exe
+desktop/src-tauri/target/release/bundle/nsis/WordSide_0.1.3_x64-setup.exe
 ```
 
 若指定 CARGO_TARGET_DIR，输出位于对应缓存目录。生成许可在 `desktop/src-tauri/generated/`，Tauri schema 在 `gen/`，均不提交源码。
@@ -78,7 +78,7 @@ capture::probe::protocol_tests::
 
 其中 `windows_copy` 使用可丢弃的 Win32 内存数据，OLE 测试使用进程内数据对象，不连接系统剪贴板；`protocol_tests` 使用私有管道和合成子进程。不要用宽泛的 `capture::` 过滤器代替上述检查，它还包含会操作窗口的实机夹具。
 
-过滤和跳过不算通过用例。真实选词、焦点、DPI、托盘与安装应另列手动验收，见[发布说明](releases/v0.1.2.md)。
+过滤和跳过不算通过用例。真实选词、焦点、DPI、托盘与安装应单独验收，在 PR 或本地任务记录中注明实际覆盖与未验项。
 
 ## 解析对照与诊断
 
@@ -96,9 +96,9 @@ npm test
 主程序提供初始化桌面前返回的诊断入口：
 
 ```powershell
-.\release\v0.1.2\WordSide_0.1.2.exe --wordside-dictionary-probe en-cn:terminal en:runtime
-.\release\v0.1.2\WordSide_0.1.2.exe --wordside-dictionary-parse C:\temp\sample-page.html
-.\release\v0.1.2\WordSide_0.1.2.exe --wordside-dictionary-licenses
+.\release\v0.1.3\WordSide_0.1.3.exe --wordside-dictionary-probe en-cn:terminal en:runtime
+.\release\v0.1.3\WordSide_0.1.3.exe --wordside-dictionary-parse C:\temp\sample-page.html
+.\release\v0.1.3\WordSide_0.1.3.exe --wordside-dictionary-licenses
 ```
 
 探针不使用桌面缓存；后端计时不等于从选词到弹窗的完整耗时。在线查询不作为 CI 必需测试。Release 文件需先自行下载或按发布步骤生成。
@@ -109,7 +109,7 @@ npm test
 
 ```powershell
 .\tools\diagnose-clipboard-formats.ps1
-.\tools\diagnose-clipboard-backup.ps1 -Executable .\release\v0.1.2\WordSide_0.1.2.exe
+.\tools\diagnose-clipboard-backup.ps1 -Executable .\release\v0.1.3\WordSide_0.1.3.exe
 ```
 
 第一项只枚举格式编号和名称；第二项读取并临时复制当前数据到内部辅助进程内存，退出即释放，只输出状态、步骤、格式编号、错误码和耗时。两者都不发送按键、不清空或写入剪贴板，也不启动产品界面。取词故障优先查看设置目录的 `capture-status.json`：它只覆盖保存最近一次失败的阶段与状态，不含选词内容。上述只读诊断工具用于进一步排查特定状态。

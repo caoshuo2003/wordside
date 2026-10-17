@@ -69,10 +69,17 @@ fn key(key: u16, up: bool, extended: bool) -> Input {
 }
 fn root(window: Handle) -> Handle { let value = unsafe { GetAncestor(window, 2) }; if value == 0 { window } else { value } }
 fn pid(window: Handle) -> u32 { let mut pid = 0; unsafe { GetWindowThreadProcessId(window, &mut pid); } pid }
-fn source_current(request: &TextRequest) -> bool {
-    request.pid != 0 && root(unsafe { GetForegroundWindow() }) == root(request.window)
-        && pid(request.window) == request.pid && focus_matches(request.window, request.focus)
+#[derive(Clone,Copy,Debug,PartialEq,Eq,serde::Serialize,serde::Deserialize)]
+#[serde(rename_all="snake_case")]
+pub(super) enum SourceRejection { InvalidSource, ForegroundChanged, ProcessChanged, FocusChanged, InputOrRequestChanged }
+fn source_rejection(request: &TextRequest) -> Option<SourceRejection> {
+    if request.pid == 0 { Some(SourceRejection::InvalidSource) }
+    else if root(unsafe { GetForegroundWindow() }) != root(request.window) { Some(SourceRejection::ForegroundChanged) }
+    else if pid(request.window) != request.pid { Some(SourceRejection::ProcessChanged) }
+    else if !focus_matches(request.window, request.focus) { Some(SourceRejection::FocusChanged) }
+    else { None }
 }
+fn source_current(request: &TextRequest) -> bool { source_rejection(request).is_none() }
 fn source_owns(request: &TextRequest) -> bool {
     let owner = unsafe { GetClipboardOwner() };
     owner != 0 && (pid(owner) == request.pid || root(owner) == root(request.window))
@@ -401,11 +408,14 @@ fn send_copy() -> bool {
 pub(super) struct CopyDiagnostics {
     input_sent: Option<bool>,
     sequence_changed: bool,
+    busy_snapshots: usize,
     source_owner: Option<bool>,
     text_read: bool,
     read_outcome: Option<&'static str>,
     restore_completed: Option<bool>,
     request_valid: bool,
+    #[serde(skip_serializing_if="Option::is_none")]
+    invalid_reason: Option<SourceRejection>,
 }
 impl CopyDiagnostics {
     // Even a partial SendInput can have started a copy. Only None proves no
@@ -419,18 +429,28 @@ struct NativeBackend<'a, V, L, R, C> {
 impl<V: Fn()->bool, L: Fn()->Option<u64>, R: FnMut(u32)->Option<CopiedText>, C: FnMut(Option<u32>)->Option<RestoreState>>
     super::copy_policy::Backend for NativeBackend<'_,V,L,R,C> {
     fn valid(&self)->bool{
-        let valid=(self.valid)() && source_current(self.request);
-        let mut diagnostics=self.diagnostics.get();diagnostics.request_valid&=valid;self.diagnostics.set(diagnostics);valid
+        let reason=if !(self.valid)() {Some(SourceRejection::InputOrRequestChanged)} else {source_rejection(self.request)};
+        let valid=reason.is_none();
+        let mut diagnostics=self.diagnostics.get();diagnostics.request_valid&=valid;
+        if diagnostics.invalid_reason.is_none() {diagnostics.invalid_reason=reason;}
+        self.diagnostics.set(diagnostics);valid
     }
     fn release_stamp(&self)->Option<u64>{released().then(||(self.release)()).flatten()}
     fn elapsed(&self)->Duration{self.started.elapsed()}
     fn pause(&mut self,duration:Duration){thread::sleep(duration);}
-    fn sequence(&mut self)->u32{
-        let sequence=unsafe{GetClipboardSequenceNumber()};
-        let mut diagnostics=self.diagnostics.get();diagnostics.sequence_changed|=sequence!=self.before;self.diagnostics.set(diagnostics);sequence
-    }
-    fn source_owns(&self)->bool{
-        let owns=source_owns(self.request);let mut diagnostics=self.diagnostics.get();diagnostics.source_owner=Some(owns);self.diagnostics.set(diagnostics);owns
+    fn snapshot(&mut self)->Option<super::copy_policy::ClipboardState>{
+        // Never attribute a sequence exposed by a writer before it closes the
+        // clipboard. Do not read/materialize data or hold this lock across IPC,
+        // SendInput, waits or restoration.
+        let mut diagnostics=self.diagnostics.get();
+        let Some(_lock)=ClipboardLock::open(0,Duration::ZERO) else {
+            diagnostics.busy_snapshots=diagnostics.busy_snapshots.saturating_add(1);
+            self.diagnostics.set(diagnostics);return None;
+        };
+        let sequence=unsafe{GetClipboardSequenceNumber()};let owns=source_owns(self.request);
+        diagnostics.sequence_changed|=sequence!=self.before;diagnostics.source_owner=Some(owns);
+        self.diagnostics.set(diagnostics);
+        Some(super::copy_policy::ClipboardState{sequence,source_owns:owns})
     }
     fn send_copy(&mut self)->bool{
         let sent=send_copy();let mut diagnostics=self.diagnostics.get();diagnostics.input_sent=Some(sent);self.diagnostics.set(diagnostics);sent
@@ -452,16 +472,54 @@ pub fn verify(request: &TextRequest, before: u32, valid: impl Fn()->bool, releas
     VerifiedCopy{selection,diagnostics:backend.diagnostics.into_inner()}
 }
 
-pub fn read_copied(request: &TextRequest, expected: u32) -> CopiedText { read_text(request,expected,false) }
-pub fn read_observed(request: &TextRequest, expected: u32) -> CopiedText { read_text(request,expected,true) }
-fn read_text(request: &TextRequest, expected: u32, allow_unowned: bool) -> CopiedText {
+// Fixed metadata only. No text, clipboard payload, process or window identifiers.
+#[derive(Clone,Copy,Debug,PartialEq,Eq,serde::Serialize,serde::Deserialize)]
+#[serde(rename_all="snake_case")]
+pub(super) enum ReadRejection { SourceBeforeRead, ClipboardBusy, SequenceChanged, OwnerBeforeRead, OwnerAfterRead, SourceAfterRead }
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq,serde::Serialize,serde::Deserialize)]
+pub(super) struct ReadDiagnostics {
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub rejected_at: Option<ReadRejection>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub source_rejection: Option<SourceRejection>,
+    pub materialization_started: bool,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub sequence_matches_before_read: Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub source_owner_before_read: Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub source_owner_after_read: Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub sequence_changed_during_read: Option<bool>,
+}
+impl ReadDiagnostics {
+    fn source_valid(&mut self, reason: Option<SourceRejection>, stage: ReadRejection) -> bool {
+        if reason.is_none() {return true;}
+        self.rejected_at=Some(stage);self.source_rejection=reason;false
+    }
+    fn begin(&mut self, actual: u32, expected: u32, owner: bool) -> bool {
+        self.sequence_matches_before_read=Some(actual==expected);self.source_owner_before_read=Some(owner);
+        if actual!=expected {self.rejected_at=Some(ReadRejection::SequenceChanged);return false;}
+        if !owner {self.rejected_at=Some(ReadRejection::OwnerBeforeRead);return false;}
+        self.materialization_started=true;true
+    }
+}
+pub fn read_copied(request: &TextRequest, expected: u32, detail: &mut ReadDiagnostics) -> CopiedText { read_text(request,expected,false,detail) }
+pub fn read_observed(request: &TextRequest, expected: u32, detail: &mut ReadDiagnostics) -> CopiedText { read_text(request,expected,true,detail) }
+fn read_text(request: &TextRequest, expected: u32, allow_unowned: bool, detail: &mut ReadDiagnostics) -> CopiedText {
+    *detail=ReadDiagnostics::default();
     // Only a caller's fresh, gesture-bound passive observation permits a null
     // owner. Synthetic copy verification always requires the source's owner.
     let owns=||source_owns(request) || allow_unowned && unsafe {GetClipboardOwner()}==0;
     let failed = |selection| CopiedText { selection, sequence: None };
-    if !source_current(request) { return failed(Selection::SourceMismatch); }
-    let Some(_lock) = ClipboardLock::open(0, Duration::from_millis(80)) else { return failed(Selection::CopyUnavailable); };
-    if unsafe { GetClipboardSequenceNumber() } != expected || !owns() { return failed(Selection::SourceMismatch); }
+    if !detail.source_valid(source_rejection(request),ReadRejection::SourceBeforeRead) {return failed(Selection::SourceMismatch);}
+    let Some(_lock) = ClipboardLock::open(0, Duration::from_millis(80)) else {
+        detail.rejected_at=Some(ReadRejection::ClipboardBusy);return failed(Selection::CopyUnavailable);
+    };
+    let locked_sequence=unsafe {GetClipboardSequenceNumber()};
+    // A new copy after the parent's locked snapshot is still rejected, even
+    // when it came from this same application. Never adopt an arbitrary update.
+    if !detail.begin(locked_sequence,expected,owns()) {return failed(Selection::SourceMismatch);}
     let mut result = (|| {
         let data = unsafe { GetClipboardData(13) };
         if data == 0 { return Selection::CopyUnavailable; }
@@ -479,8 +537,11 @@ fn read_text(request: &TextRequest, expected: u32, allow_unowned: bool) -> Copie
     // Materialization may advance the sequence while this same source owns the
     // locked clipboard. Return that final sequence even for invalid text so the
     // independent backup helper can still restore the original formats.
-    let sequence = owns().then(|| unsafe { GetClipboardSequenceNumber() });
-    if sequence.is_none() || !source_current(request) { result = Selection::SourceMismatch; }
+    let owner=owns();detail.source_owner_after_read=Some(owner);
+    let sequence=owner.then(||unsafe {GetClipboardSequenceNumber()});
+    detail.sequence_changed_during_read=sequence.map(|value|value!=locked_sequence);
+    if !owner {detail.rejected_at=Some(ReadRejection::OwnerAfterRead);result=Selection::SourceMismatch;}
+    else if !detail.source_valid(source_rejection(request),ReadRejection::SourceAfterRead) {result=Selection::SourceMismatch;}
     CopiedText { selection: result, sequence }
 }
 
@@ -502,6 +563,27 @@ mod tests {
     }
 
     use super::*;
+    #[test] fn copied_reader_rejects_a_new_copy_even_when_the_same_source_still_owns_it() {
+        for owner in [false,true] {
+            let mut detail=ReadDiagnostics::default();
+            assert!(!detail.begin(12,11,owner));assert!(!detail.materialization_started);
+            assert_eq!(detail.rejected_at,Some(ReadRejection::SequenceChanged));
+        }
+        let mut detail=ReadDiagnostics::default();
+        assert!(!detail.begin(11,11,false));assert_eq!(detail.rejected_at,Some(ReadRejection::OwnerBeforeRead));
+        assert!(!detail.materialization_started);
+        let mut detail=ReadDiagnostics::default();
+        assert!(detail.begin(11,11,true));assert!(detail.materialization_started);assert_eq!(detail.rejected_at,None);
+    }
+    #[test] fn copied_reader_diagnostics_distinguish_source_rejection_before_and_after_materialization() {
+        for stage in [ReadRejection::SourceBeforeRead,ReadRejection::SourceAfterRead] {
+            let mut detail=ReadDiagnostics::default();
+            if stage==ReadRejection::SourceAfterRead {assert!(detail.begin(11,11,true));}
+            assert!(!detail.source_valid(Some(SourceRejection::FocusChanged),stage));
+            assert_eq!(detail.rejected_at,Some(stage));assert_eq!(detail.source_rejection,Some(SourceRejection::FocusChanged));
+            assert_eq!(detail.materialization_started,stage==ReadRejection::SourceAfterRead);
+        }
+    }
     #[test] fn notepad_regression_partial_copy_or_skipped_restore_cannot_be_retried() {
         for input_sent in [None,Some(false),Some(true)] {
             for restore_completed in [None,Some(false),Some(true)] {

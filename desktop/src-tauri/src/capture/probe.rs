@@ -1,13 +1,13 @@
 //! Recoverable UIA/text reader and isolated clipboard backup/restore. The parent owns the transaction.
-use super::{windows_text::{TextRequest,selected_text},selection::Selection};
+use super::{windows_text::{TextRequest,selected_text_diagnosed,ProviderDiagnostics},selection::Selection};
 use serde::{Serialize,Deserialize};
 use std::{io::{BufRead,BufReader,Read,Write},process::{Child,ChildStdin,Command,Stdio},sync::{Arc,Mutex,Condvar,mpsc::{channel,Receiver},atomic::{AtomicU64,Ordering}},thread::{self,JoinHandle},time::{Duration,Instant}};
 use std::os::windows::{process::CommandExt,io::AsRawHandle};
 use ::windows::{core::Interface,Win32::{Foundation::{CloseHandle,HANDLE},System::{Com::{CoInitializeEx,CoUninitialize,CoCreateInstance,COINIT_MULTITHREADED,CLSCTX_INPROC_SERVER},JobObjects::{CreateJobObjectW,SetInformationJobObject,AssignProcessToJobObject,JOBOBJECT_EXTENDED_LIMIT_INFORMATION,JobObjectExtendedLimitInformation,JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE}},UI::Accessibility::{IUIAutomation,IUIAutomation2,CUIAutomation}}};
 const PREFIX:&str="WORDSIDEPROBE ";
 #[derive(Clone,Serialize,Deserialize)]pub struct ProbeRequest{pub serial:u64,pub text:TextRequest}
-#[derive(Serialize,Deserialize)]pub struct ProbeResult{pub serial:u64,pub selection:Selection,#[serde(default)]pub retryable:bool,#[serde(default)]native_verified:bool,#[serde(default,skip_serializing_if="Option::is_none")]pub clipboard_sequence:Option<u32>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_failure:Option<super::windows_copy::BackupFailure>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_ole_formats:Option<usize>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_restore:Option<super::windows_copy::RestoreState>}
-impl ProbeResult{fn selection(serial:u64,selection:Selection)->Self{Self{serial,selection,retryable:false,native_verified:false,clipboard_sequence:None,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}}}
+#[derive(Serialize,Deserialize)]pub struct ProbeResult{pub serial:u64,pub selection:Selection,#[serde(default)]pub retryable:bool,#[serde(default)]native_verified:bool,#[serde(default,skip_serializing_if="Option::is_none")]provider_detail:Option<ProviderDiagnostics>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_read:Option<super::windows_copy::ReadDiagnostics>,#[serde(default,skip_serializing_if="Option::is_none")]pub clipboard_sequence:Option<u32>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_failure:Option<super::windows_copy::BackupFailure>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_ole_formats:Option<usize>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_restore:Option<super::windows_copy::RestoreState>}
+impl ProbeResult{fn selection(serial:u64,selection:Selection)->Self{Self{serial,selection,retryable:false,native_verified:false,provider_detail:None,clipboard_read:None,clipboard_sequence:None,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}}}
 struct Job(HANDLE);
 impl Job{
  fn own(child:&Child)->Result<Self,String>{unsafe{
@@ -127,6 +127,7 @@ impl Worker{
     }
     let provider=read_provider(&request,work_item.point,||current.load(Ordering::SeqCst)==request.serial && work_item.guard.as_ref().is_none_or(|(generation,expected)|generation.load(Ordering::SeqCst)==*expected),|request|helper.as_mut().unwrap().exchange(request,&current,timeout.saturating_sub(started.elapsed())));
     let native_verified=provider.as_ref().is_some_and(|reply|reply.native_verified);
+    report.provider_detail=provider.as_ref().and_then(|reply|reply.provider_detail);
     let mut outcome=provider.map(|reply|reply.selection);
     if outcome.is_none()||matches!(outcome,Some(Selection::Timeout|Selection::ReadError(_))){helper=None;}
     report.provider=super::diagnostics::code(outcome.as_ref());
@@ -148,6 +149,7 @@ impl Worker{
      report.backup=prepared.as_ref().and_then(|reply|reply.clipboard_failure);
      outcome=if let Some(before)=prepared.as_ref().and_then(|reply|reply.clipboard_sequence){
       report.phase=super::diagnostics::Phase::Copy;
+      let read_detail=std::cell::Cell::new(None);
       let verified=super::windows_copy::verify(&request.text,before,valid,||work_item.release.as_ref().and_then(super::timing::Activity::stamp),|sequence|{
        if helper.is_none(){helper=Helper::spawn(&program,&args).ok();}
        let Some(reader)=helper.as_mut() else{return Some(super::copy_policy::CopiedText{selection:Selection::CopyUnavailable,sequence:None});};
@@ -157,7 +159,7 @@ impl Worker{
        let cleanup_serial=AtomicU64::new(request.serial);
        let result=reader.exchange(&copy_request,&cleanup_serial,Duration::from_millis(350));
        if result.as_ref().is_none_or(|reply|matches!(reply.selection,Selection::Timeout|Selection::ReadError(_))){helper=None;}
-       result.map(|reply|super::copy_policy::CopiedText{selection:reply.selection,sequence:reply.clipboard_sequence})
+       result.map(|reply|{read_detail.set(reply.clipboard_read);super::copy_policy::CopiedText{selection:reply.selection,sequence:reply.clipboard_sequence}})
       },|sequence|{
        let Some(backup)=backup_helper.as_mut() else{return None;};
        let mut restore_request=request.clone();restore_request.text.origin=super::windows_text::TextOrigin::Restore(sequence);
@@ -169,13 +171,15 @@ impl Worker{
        state
       });
       input_attempted=verified.diagnostics.input_attempted();
-      report.copy=Some(verified.diagnostics);verified.selection
+      report.copy_read=read_detail.get();report.copy=Some(verified.diagnostics);verified.selection
      }else{
       let failure=prepared.map(|reply|reply.selection);
       if failure.is_none()||matches!(failure,Some(Selection::Timeout|Selection::ReadError(_))){backup_helper=None;}
       failure.map(|_|Selection::ClipboardUnavailable)
      };
     }
+    report.request_current=Some(current.load(Ordering::SeqCst)==request.serial);
+    report.input_current=Some(work_item.guard.as_ref().is_none_or(|(generation,expected)|generation.load(Ordering::SeqCst)==*expected));
     report.finish(&recorder,outcome.as_ref(),started);
     // A source/focus check can reject a copy between coordinator polls. If
     // this serial is still current, silence would strand its awaiting request.
@@ -207,7 +211,7 @@ impl Worker{
  pub fn cancel(&self,serial:u64){let mut guard=self.mailbox.0.lock().unwrap();self.latest.store(serial,Ordering::SeqCst);guard.pending=None;self.mailbox.1.notify_one();}
 }
 impl Drop for Worker{fn drop(&mut self){self.latest.fetch_add(1,Ordering::SeqCst);self.observed_latest.fetch_add(1,Ordering::SeqCst);self.mailbox.0.lock().unwrap().closed=true;self.mailbox.1.notify_one();if let Some(join)=self.join.take(){let _=join.join();}}}
-fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
+fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest,&mut ProviderDiagnostics)->Selection){unsafe{
  let mut com_initialized=false;
  {
   // Clipboard-only helpers must not start UI Automation. Cold UIA activation
@@ -220,7 +224,7 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
    let reply=match request.text.origin {
     super::windows_text::TextOrigin::Backup=>{
      let clipboard_failure=match super::windows_copy::Backup::take(){Ok(value)=>{backup=Some(value);None},Err(error)=>{backup=None;Some(error)}};
-     ProbeResult{serial:request.serial,retryable:false,native_verified:false,selection:if backup.is_some(){Selection::NoSelection}else{Selection::ClipboardUnavailable},clipboard_sequence:backup.as_ref().map(|value|value.before),clipboard_failure,clipboard_ole_formats:backup.as_ref().map(|value|value.ole_formats),clipboard_restore:None}
+     ProbeResult{serial:request.serial,retryable:false,native_verified:false,provider_detail:None,clipboard_read:None,selection:if backup.is_some(){Selection::NoSelection}else{Selection::ClipboardUnavailable},clipboard_sequence:backup.as_ref().map(|value|value.before),clipboard_failure,clipboard_ole_formats:backup.as_ref().map(|value|value.ole_formats),clipboard_restore:None}
     },
     super::windows_text::TextOrigin::Restore(sequence)=>{
      let state=backup.take().and_then(|mut value|value.restore(sequence,&request.text).ok());
@@ -228,16 +232,18 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
      reply.clipboard_restore=state;reply
     },
     super::windows_text::TextOrigin::Clipboard(sequence)|super::windows_text::TextOrigin::ObservedClipboard(sequence)=>{
+     let mut detail=super::windows_copy::ReadDiagnostics::default();
      let copied=if matches!(request.text.origin,super::windows_text::TextOrigin::ObservedClipboard(_)) {
-      super::windows_copy::read_observed(&request.text,sequence)
-     }else{super::windows_copy::read_copied(&request.text,sequence)};
-     ProbeResult{serial:request.serial,retryable:false,native_verified:false,selection:copied.selection,clipboard_sequence:copied.sequence,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}
+      super::windows_copy::read_observed(&request.text,sequence,&mut detail)
+     }else{super::windows_copy::read_copied(&request.text,sequence,&mut detail)};
+     ProbeResult{serial:request.serial,retryable:false,native_verified:false,provider_detail:None,clipboard_read:Some(detail),selection:copied.selection,clipboard_sequence:copied.sequence,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}
     },
     _=>{
-     let native=super::windows_text::native_selection(&request.text);
+     let mut detail=ProviderDiagnostics::default();
+     let native=super::windows_text::native_selection(&request.text,&mut detail);
      if let Some(selection)=native {
       let mut reply=ProbeResult::selection(request.serial,selection);
-      reply.native_verified=matches!(reply.selection,Selection::Word(_)); reply
+      reply.native_verified=matches!(reply.selection,Selection::Word(_)); reply.provider_detail=Some(detail.completed(&reply.selection)); reply
      }else {
      if automation.is_none(){
       if !com_initialized { if CoInitializeEx(None,COINIT_MULTITHREADED).is_ok(){com_initialized=true;}else{break;} }
@@ -246,7 +252,8 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
        automation=Some(created);
       }
      }
-     ProbeResult::selection(request.serial,match automation.as_ref(){Some(automation)=>read(automation,&request.text),None=>Selection::ReadError("Start selection automation".into())})
+     let mut reply=ProbeResult::selection(request.serial,match automation.as_ref(){Some(automation)=>read(automation,&request.text,&mut detail),None=>Selection::ReadError("Start selection automation".into())});
+     reply.provider_detail=Some(detail.completed(&reply.selection));reply
      }
     },
    };
@@ -255,10 +262,10 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
  }
  if com_initialized{CoUninitialize();}
 }}
-pub fn helper_entry()->bool{if std::env::args().nth(1).as_deref()!=Some("--wordside-selection-helper"){return false;}serve(selected_text);true}
+pub fn helper_entry()->bool{if std::env::args().nth(1).as_deref()!=Some("--wordside-selection-helper"){return false;}serve(selected_text_diagnosed);true}
 #[cfg(test)]mod tests{
  use super::*;use super::super::windows_text::{TextOrigin,tests::ExternalFixture};
- #[test]#[ignore="isolated helper entry used by recovery tests"]fn helper_process(){serve(|automation,request|{if request.pid==u32::MAX{thread::sleep(Duration::from_secs(60));}selected_text(automation,request)});}
+ #[test]#[ignore="isolated helper entry used by recovery tests"]fn helper_process(){serve(|automation,request,detail|{if request.pid==u32::MAX{thread::sleep(Duration::from_secs(60));}selected_text_diagnosed(automation,request,detail)});}
  #[test]fn hung_helper_is_reaped_and_next_real_selection_recovers(){
   let fixture=ExternalFixture::new();let(worker,answers)=Worker::start(std::env::current_exe().unwrap(),vec!["--ignored".into(),"--exact".into(),"capture::probe::tests::helper_process".into(),"--nocapture".into()],Duration::from_millis(1200),Duration::from_millis(200));
   let request=|serial,pid|ProbeRequest{serial,text:TextRequest{pid,window:fixture.edit,origin:TextOrigin::Window,focus:0}};
@@ -288,14 +295,49 @@ pub fn helper_entry()->bool{if std::env::args().nth(1).as_deref()!=Some("--words
    let mut reply=ProbeResult::selection(request.serial,Selection::Word("runtime".into()));
    if request.text.pid==42 {reply.native_verified=true;}
    if request.text.pid==43 {reply.selection=Selection::ReadError("Synthetic provider restart".into());}
+   if request.text.pid==44 {reply.selection=Selection::SourceMismatch;reply.provider_detail=Some(ProviderDiagnostics{rejected_at:Some(super::super::windows_text::ProviderRejection::UiaFocusChanged),ancestor_count:9});}
    match request.text.origin{
     TextOrigin::Backup=>{reply.selection=Selection::NoSelection;reply.clipboard_sequence=Some(77);},
     TextOrigin::Restore(sequence)=>{reply.selection=Selection::NoSelection;reply.clipboard_restore=Some(if sequence.is_some(){super::super::windows_copy::RestoreState::Restored}else{super::super::windows_copy::RestoreState::Skipped});},
     TextOrigin::Clipboard(sequence)|TextOrigin::ObservedClipboard(sequence)=>reply.clipboard_sequence=Some(sequence.wrapping_add(1)),
     _=>{},
    }
+   if request.text.pid==45 {
+    reply.selection=Selection::SourceMismatch;reply.clipboard_sequence=None;
+    reply.clipboard_read=Some(super::super::windows_copy::ReadDiagnostics{
+     rejected_at:Some(super::super::windows_copy::ReadRejection::SequenceChanged),
+     sequence_matches_before_read:Some(false),source_owner_before_read:Some(true),..Default::default()});
+   }
    println!("{PREFIX}{}",serde_json::to_string(&reply).unwrap());std::io::stdout().flush().unwrap();
   }
+ }
+ #[test]fn provider_rejection_metadata_survives_helper_ipc_without_recording_selection_or_identity(){
+  let temp=tempfile::tempdir().unwrap();let status=temp.path().join("capture-status.json");
+  let(worker,answers)=Worker::start_recorded(std::env::current_exe().unwrap(),arguments(),Duration::from_millis(300),Duration::from_millis(300),Some(status.clone()));
+  worker.submit(request(1,44,TextOrigin::Focused));
+  assert_eq!(answers.recv_timeout(Duration::from_secs(3)).unwrap().selection,Selection::SourceMismatch);
+  let raw=std::fs::read_to_string(status).unwrap();let saved:serde_json::Value=serde_json::from_str(&raw).unwrap();
+  assert_eq!(saved["provider_detail"],serde_json::json!({"rejected_at":"uia_focus_changed","ancestor_count":9}));
+  assert_eq!(saved["request_current"],true);assert_eq!(saved["input_current"],true);
+  assert!(saved.get("copy").is_none());assert!(raw.len()<4096);
+  for private in ["runtime","serial","window","focus_id","pid"] {assert!(!raw.contains(private));}
+  assert!(serde_json::from_value::<ProviderDiagnostics>(serde_json::json!({"rejected_at":"PRIVATE_WORD","ancestor_count":9})).is_err(),"provider reasons are a fixed enum, never raw text");
+ }
+ #[test]fn copied_reader_rejection_metadata_survives_ipc_without_selection_or_identity(){
+  let mut helper=Helper::spawn(&std::env::current_exe().unwrap(),&arguments()).unwrap();let latest=AtomicU64::new(1);
+  let reply=helper.exchange(&request(1,45,TextOrigin::Clipboard(11)),&latest,Duration::from_secs(2)).unwrap();
+  assert_eq!(reply.selection,Selection::SourceMismatch);assert_eq!(reply.clipboard_sequence,None);
+  let temp=tempfile::tempdir().unwrap();let status=temp.path().join("capture-status.json");
+  let mut report=super::super::diagnostics::FailureReport::new();report.provider="word";
+  report.phase=super::super::diagnostics::Phase::Copy;report.copy_read=reply.clipboard_read;
+  report.finish(&super::super::diagnostics::FailureRecorder::new(Some(status.clone())),Some(&reply.selection),Instant::now());
+  let raw=std::fs::read_to_string(status).unwrap();let saved:serde_json::Value=serde_json::from_str(&raw).unwrap();
+  assert_eq!(saved["copy_read"],serde_json::json!({"rejected_at":"sequence_changed","materialization_started":false,"sequence_matches_before_read":false,"source_owner_before_read":true}));
+  for private in ["runtime","serial","window","focus_id","pid","clipboard_sequence"] {assert!(!raw.contains(private));}
+  assert!(raw.len()<4096);
+  assert!(serde_json::from_value::<super::super::windows_copy::ReadDiagnostics>(serde_json::json!({"rejected_at":"PRIVATE_WORD","materialization_started":false})).is_err());
+  let old:ProbeResult=serde_json::from_value(serde_json::json!({"serial":1,"selection":{"kind":"source_mismatch"}})).unwrap();
+  assert_eq!(old.clipboard_read,None,"older helper replies remain compatible");
  }
  #[test] fn manual_provider_empty_pointer_preserves_document_verification_but_not_denials() {
   for first in [Selection::Unreported,Selection::Unsupported] {

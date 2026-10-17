@@ -31,7 +31,12 @@ fn closest<'a>(selection: &Selection<'a>, selector: &str) -> Selection<'a> {
 }
 pub fn parse_page(html: &str) -> Result<Value, QueryError> {
     let doc = document(html)?;
-    let word = doc.select_single(".hw.dhw").text().to_string();
+    let mut word = doc.select_single(".hw.dhw").text().to_string();
+    // Standalone phrase entries have their own title, without .hw.dhw.
+    // Keep ordinary headword priority and all completeness checks below.
+    if word.is_empty() {
+        word = doc.select_single(".phrase-di-block.dphrase-di-block > .di-title .headword.dhw").text().to_string();
+    }
     if word.is_empty() {
         let canonical = doc.select("link[rel=canonical]").attr_or("href", "");
         return Err(if LANDING.is_match(&canonical) { QueryError::not_found() } else { QueryError::invalid_page() });
@@ -57,7 +62,7 @@ pub fn parse_page(html: &str) -> Result<Value, QueryError> {
     let mut definition = Vec::with_capacity(blocks.length());
     let mut assigned_bodies = 0;
     for (index, block) in blocks.iter().enumerate() {
-        let pos = closest(&block, ".pr.entry-body__el").select_single(".pos.dpos").text();
+        let pos = closest(&block, ".pr.entry-body__el, .phrase-di-block.dphrase-di-block").select_single(".pos.dpos").text();
         let source = closest(&block, ".pr.dictionary").attr("data-id");
         let texts = block.select(".def.ddef_d.db");
         let text = texts.text();

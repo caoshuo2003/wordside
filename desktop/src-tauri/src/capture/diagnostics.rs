@@ -11,11 +11,19 @@ pub struct FailureReport {
     elapsed_ms: u128,
     pub phase: Phase,
     pub provider: &'static str,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub provider_detail: Option<super::windows_text::ProviderDiagnostics>,
     outcome: &'static str,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub request_current: Option<bool>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub input_current: Option<bool>,
     #[serde(skip_serializing_if="Option::is_none")]
     pub backup: Option<BackupFailure>,
     #[serde(skip_serializing_if="Option::is_none")]
     pub copy: Option<CopyDiagnostics>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub copy_read: Option<super::windows_copy::ReadDiagnostics>,
 }
 pub fn code(selection: Option<&Selection>) -> &'static str {
     selection.map(|value|value.failure().map(|(code,_)|code).unwrap_or("word")).unwrap_or("cancelled")
@@ -23,7 +31,7 @@ pub fn code(selection: Option<&Selection>) -> &'static str {
 impl FailureReport {
     pub fn new() -> Self {
         Self { version:env!("CARGO_PKG_VERSION"),timestamp_ms:SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),elapsed_ms:0,
-            phase:Phase::Provider,provider:"pending",outcome:"pending",backup:None,copy:None }
+            phase:Phase::Provider,provider:"pending",provider_detail:None,outcome:"pending",request_current:None,input_current:None,backup:None,copy:None,copy_read:None }
     }
     pub fn finish(mut self, recorder: &FailureRecorder, outcome: Option<&Selection>, started: Instant) {
         if matches!(outcome,Some(Selection::Word(_))) {return;}

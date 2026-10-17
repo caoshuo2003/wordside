@@ -177,9 +177,15 @@ fn focus_failure(mut value: Awaiting, source: Source, epoch: u64, enabled: bool,
     Some(candidate(value,Selection::SourceMismatch,now,None))
 }
 fn selection_requires_focus(selection: &Selection) -> bool {matches!(selection,Selection::Word(_))}
-enum Preparation { Ready, Wait, Failed, Cancelled }
-fn prepare_submission(value: &mut Awaiting, source: Source, epoch: u64, enabled: bool, now: Instant) -> Preparation {
+enum Preparation { Ready, Wait, InFlight, Failed, Cancelled }
+fn prepare_submission(value: &mut Awaiting, source: Source, epoch: u64, enabled: bool, now: Instant, input_ready: bool) -> Preparation {
     if !operation_valid(value,source,epoch,enabled,false) { return Preparation::Cancelled; }
+    // Once dispatched, a modifier edge must not cancel and restart this work:
+    // the worker may already have sent its one copy. Real selection/source
+    // changes still fail operation_valid; the worker/publication release gates
+    // handle held modifiers without authorizing another copy.
+    if value.submitted || value.failure.is_some() { return Preparation::InFlight; }
+    if !input_ready || now < value.not_before { return Preparation::Wait; }
     prepare_focus(value,source,now)
 }
 fn prepare_focus(value: &mut Awaiting, source: Source, now: Instant) -> Preparation {
@@ -391,22 +397,17 @@ pub fn run(app: AppHandle) {
                 if let Some(value)=candidate.as_ref(){begin(&app,serial,true,value.epoch);}
             }
         }
-        if !idle && awaiting.as_ref().is_some_and(|value|!value.manual && value.submitted && value.failure.is_none()) {
-            serial=serial.wrapping_add(1); invalidate(&worker,&state,serial);
-            if let Some(value)=awaiting.as_mut(){value.serial=serial;value.submitted=false;}
-        }
         let mut dispatch_rejected=None;
-        if idle && release_stamp(observer.as_ref())==input_stamp { if let Some(value)=awaiting.as_mut() { if !value.submitted && value.failure.is_none() && Instant::now()>=value.not_before {
-            // Bind focus from the same fresh snapshot used for this dispatch,
-            // not the context sampled before input/result processing.
+        if let Some(value)=awaiting.as_mut() {
+            // Decide source, in-flight state and release readiness together.
             let latest=current_source(root_window(unsafe{GetForegroundWindow()}));
-            match prepare_submission(value,latest,epoch,enabled,Instant::now()) {
+            match prepare_submission(value,latest,epoch,enabled,Instant::now(),idle && release_stamp(observer.as_ref())==input_stamp) {
                 Preparation::Ready=>{begin(&app,value.serial,value.manual,value.epoch); request(&worker,value);},
                 Preparation::Cancelled=>{dispatch_rejected=Some(latest);},
-                Preparation::Wait=>{},
+                Preparation::Wait|Preparation::InFlight=>{},
                 Preparation::Failed=>{begin(&app,value.serial,value.manual,value.epoch); value.failure=Some(Selection::SourceMismatch);},
             }
-        } } }
+        }
         if let Some(latest)=dispatch_rejected {
             let value=awaiting.take().expect("dispatch rejection belongs to the current request");
             serial=serial.wrapping_add(1); invalidate(&worker,&state,serial); capture.clear();
@@ -505,10 +506,10 @@ mod tests {
     #[test] fn capture_race_manual_dispatch_binds_fresh_child_focus_only_in_the_same_source() {
         let now=Instant::now(); let mut value=operation(); value.manual=true;
         let latest=Source{focus:22,..source()};
-        assert!(matches!(prepare_submission(&mut value,latest,1,false,now),Preparation::Wait));
+        assert!(matches!(prepare_submission(&mut value,latest,1,false,now,true),Preparation::Wait));
         assert_eq!(value.focus,21);
         let old=value.focus;
-        assert!(matches!(prepare_submission(&mut value,Source{window:30,focus:31,..source()},1,false,now),Preparation::Cancelled));
+        assert!(matches!(prepare_submission(&mut value,Source{window:30,focus:31,..source()},1,false,now,true),Preparation::Cancelled));
         assert_eq!(value.focus,old,"another source cannot bind its child to this request");
     }
     #[test] fn capture_race_new_input_rejects_old_evidence_without_losing_pending_gesture() {
@@ -690,6 +691,31 @@ mod tests {
             press_started: sampled_press_invalidates(true, true, false), mouse_down: true, inside_popup: false, focus: crate::dismissal::Focus::Source }), "an observed up must not trigger hide_popup/capture.clear");
         assert!(dismissal.update(now, crate::dismissal::Snapshot { visible: true, pinned: false,
             press_started: true, mouse_down: true, inside_popup: false, focus: crate::dismissal::Focus::Source }), "an actual outside down still dismisses the old card");
+    }
+    #[test] fn continuous_lookup_modifier_edges_never_restart_an_inflight_copy() {
+        let at=Instant::now();let generation=Arc::new(AtomicU64::new(10));
+        for manual in [false,true] {
+            let mut value=operation();value.manual=manual;value.guard=Some((generation.clone(),10));
+            value.not_before=at;
+            assert!(matches!(prepare_submission(&mut value,source(),1,true,at,true),Preparation::Ready));
+            value.submitted=true;let serial=value.serial;
+            // A modifier edge changes Activity; the selected text and input
+            // generation are unchanged. The first worker may already be copying.
+            assert!(matches!(prepare_submission(&mut value,source(),1,true,at+Duration::from_millis(100),false),Preparation::InFlight));
+            assert!(matches!(prepare_submission(&mut value,source(),1,true,at+Duration::from_millis(200),true),Preparation::InFlight));
+            assert!(value.submitted);assert_eq!(value.serial,serial);
+        }
+    }
+    #[test] fn continuous_lookup_real_input_source_and_epoch_changes_still_cancel() {
+        let at=Instant::now();let generation=Arc::new(AtomicU64::new(10));
+        let mut value=operation();value.submitted=true;value.guard=Some((generation.clone(),10));
+        for ready in [false,true] {
+            assert!(matches!(prepare_submission(&mut value,Source{window:99,..source()},1,true,at,ready),Preparation::Cancelled));
+            assert!(matches!(prepare_submission(&mut value,Source{focus:99,..source()},1,true,at,ready),Preparation::Cancelled));
+            assert!(matches!(prepare_submission(&mut value,source(),2,true,at,ready),Preparation::Cancelled));
+        }
+        generation.store(11,Ordering::SeqCst);
+        assert!(matches!(prepare_submission(&mut value,source(),1,true,at,false),Preparation::Cancelled));
     }
     #[test] fn api6_automatic_and_manual_probe_the_same_real_focus_before_pointer_retry() {
         let automatic = probe_request(&operation()); let mut value = operation(); value.manual = true; value.pointer_retry = false;

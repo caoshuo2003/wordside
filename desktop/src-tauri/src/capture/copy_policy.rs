@@ -40,13 +40,15 @@ pub struct CopiedText {
     // advance this sequence without another application replacing the data.
     pub sequence: Option<u32>,
 }
+// Both values must come from the same locked clipboard snapshot. An open
+// writer can expose intermediate sequence numbers before it has published text.
+pub struct ClipboardState { pub sequence: u32, pub source_owns: bool }
 pub trait Backend {
     fn valid(&self) -> bool;
     fn release_stamp(&self) -> Option<u64>;
     fn elapsed(&self) -> std::time::Duration;
     fn pause(&mut self, duration: std::time::Duration);
-    fn sequence(&mut self) -> u32;
-    fn source_owns(&self) -> bool;
+    fn snapshot(&mut self) -> Option<ClipboardState>;
     fn send_copy(&mut self) -> bool;
     fn read(&mut self, sequence: u32) -> Option<CopiedText>;
     fn restore(&mut self, sequence: Option<u32>) -> bool;
@@ -58,19 +60,29 @@ pub fn transact(backend: &mut impl Backend, before: u32) -> Option<Selection> {
     let outcome = (|| {
         let mut release=super::timing::Released::default();
         let started=std::time::Instant::now();
-        while !release.ready(backend.release_stamp(),started+backend.elapsed()) {
+        let mut clipboard_busy=false;
+        loop {
             if !backend.valid() { return None; }
-            if backend.elapsed() >= Duration::from_millis(650) { return Some(Selection::CopyUnavailable); }
+            if release.ready(backend.release_stamp(),started+backend.elapsed()) {
+                if let Some(state)=backend.snapshot() {
+                    if state.sequence!=before {return Some(Selection::ClipboardUnavailable);}
+                    if !backend.valid() {return None;}
+                    // A modifier can change while the clipboard is busy even
+                    // though the selection's input generation remains current.
+                    if release.ready(backend.release_stamp(),started+backend.elapsed()) {break;}
+                } else {clipboard_busy=true;}
+            }
+            if backend.elapsed()>=Duration::from_millis(650) {
+                return Some(if clipboard_busy {Selection::ClipboardUnavailable}else{Selection::CopyUnavailable});
+            }
             backend.pause(Duration::from_millis(10));
         }
-        if !backend.valid() { return None; }
-        if backend.sequence() != before { return Some(Selection::ClipboardUnavailable); }
         let sent = backend.send_copy();
         let until = backend.elapsed() + Duration::from_millis(1000);
         loop {
             let current = backend.valid();
-            let sequence = backend.sequence();
-            if let Some(sequence) = receipt.observe(sequence, backend.source_owns(), current) {
+            let attributed=backend.snapshot().and_then(|state|receipt.observe(state.sequence,state.source_owns,current));
+            if let Some(sequence) = attributed {
                 copied = Some(sequence);
                 if !current { return None; }
                 return if sent {
@@ -145,11 +157,19 @@ mod transaction_tests {
         time: Duration, release: Duration, sequence: u32, current: bool, owner: bool,
         sent: bool, copies: usize, reads: usize, cleanups: Vec<Option<u32>>,
         release_trace: Vec<(Duration,Option<u64>)>, read_missing: bool, response_after: Option<Duration>, on_read: Option<(bool,u32)>, materialized: Option<u32>, restore_ok: bool,
+        writer_until: Option<Duration>, busy_before: Option<Duration>, sent_at: Option<Duration>,
     }
     impl Default for Fake {
         fn default() -> Self { Self { time:Duration::ZERO,release:Duration::ZERO,sequence:10,current:true,
             owner:true,sent:true,copies:0,reads:0,cleanups:vec![],response_after:Some(Duration::from_millis(10)),
-            release_trace:vec![],read_missing:false,on_read:None,materialized:None,restore_ok:true } }
+            release_trace:vec![],read_missing:false,on_read:None,materialized:None,restore_ok:true,writer_until:None,busy_before:None,sent_at:None } }
+    }
+    impl Fake {
+        fn sequence(&mut self)->u32{
+            if self.copies>0&&self.response_after.is_some_and(|at|self.time>=at)&&self.sequence==10{self.sequence=11;}
+            if self.copies>0 && self.sequence==11 && self.writer_until.is_some_and(|until|self.time>=until) {self.sequence=12;}
+            self.sequence
+        }
     }
     impl Backend for Fake {
         fn valid(&self)->bool{self.current}
@@ -159,15 +179,22 @@ mod transaction_tests {
         }
         fn elapsed(&self)->Duration{self.time}
         fn pause(&mut self,duration:Duration){self.time+=duration;}
-        fn sequence(&mut self)->u32{
-            if self.copies>0&&self.response_after.is_some_and(|at|self.time>=at)&&self.sequence==10{self.sequence=11;}
-            self.sequence
+        fn snapshot(&mut self)->Option<ClipboardState>{
+            if self.copies==0 && self.busy_before.is_some_and(|until|self.time<until) {return None;}
+            if self.copies>0 && self.writer_until.is_some_and(|until|self.time<until) {return None;}
+            Some(ClipboardState{sequence:self.sequence(),source_owns:self.owner})
         }
-        fn source_owns(&self)->bool{self.owner}
-        fn send_copy(&mut self)->bool{self.copies+=1;self.sent}
+        fn send_copy(&mut self)->bool{self.sent_at=Some(self.time);self.copies+=1;self.sent}
         fn read(&mut self,sequence:u32)->Option<CopiedText>{
             self.reads+=1;
             if self.read_missing {return None;}
+            if let Some(until)=self.writer_until {
+                // The IPC reader cannot open the clipboard while its writer
+                // owns the lock. It sees the final state after the writer closes.
+                self.time=self.time.max(until);
+                let actual=self.sequence();
+                if actual!=sequence {return Some(CopiedText{selection:Selection::SourceMismatch,sequence:None});}
+            }
             let proven=self.materialized.unwrap_or(sequence);
             if self.materialized.is_some(){self.sequence=proven;}
             // This update happens after the reader released its clipboard lock.
@@ -185,6 +212,31 @@ mod transaction_tests {
         assert_eq!(transact(&mut backend,10),Some(Selection::Word("runtime".into())));
         assert_eq!((backend.copies,backend.reads,backend.sequence),(1,1,10));
         assert_eq!(backend.cleanups,vec![Some(11)]);
+    }
+    #[test]fn github_copy_publishing_is_not_attributed_until_the_writer_closes(){
+        let mut backend=Fake{writer_until:Some(Duration::from_millis(120)),..Fake::default()};
+        assert_eq!(transact(&mut backend,10),Some(Selection::Word("runtime".into())));
+        assert_eq!((backend.copies,backend.reads,backend.sequence),(1,1,10));
+        assert_eq!(backend.cleanups,vec![Some(12)],"restore only the completed copy, never its intermediate sequence");
+    }
+    #[test]fn github_copy_publishing_that_never_finishes_does_not_start_the_reader(){
+        let mut backend=Fake{writer_until:Some(Duration::from_secs(3)),..Fake::default()};
+        assert_eq!(transact(&mut backend,10),Some(Selection::CopyUnavailable));
+        assert_eq!((backend.copies,backend.reads),(1,0));
+        assert_eq!(backend.cleanups,vec![None]);
+        assert!(backend.time<Duration::from_millis(1200));
+    }
+    #[test]fn a_modifier_pressed_while_the_clipboard_is_busy_restarts_the_release_fence(){
+        let mut backend=Fake{busy_before:Some(Duration::from_millis(100)),
+            release_trace:vec![(Duration::ZERO,Some(1)),(Duration::from_millis(60),None),(Duration::from_millis(120),Some(3))],..Fake::default()};
+        assert_eq!(transact(&mut backend,10),Some(Selection::Word("runtime".into())));
+        assert!(backend.sent_at.unwrap()>=Duration::from_millis(160));assert_eq!(backend.copies,1);
+    }
+    #[test]fn a_busy_clipboard_before_dispatch_is_bounded_and_never_receives_input(){
+        let mut backend=Fake{busy_before:Some(Duration::from_secs(3)),..Fake::default()};
+        assert_eq!(transact(&mut backend,10),Some(Selection::ClipboardUnavailable));
+        assert_eq!((backend.copies,backend.reads),(0,0));assert_eq!(backend.cleanups,vec![None]);
+        assert!(backend.time<Duration::from_millis(700));
     }
     #[test]fn held_shortcut_waits_and_cannot_be_mixed_with_the_copy_chord(){
         let mut backend=Fake{release:Duration::from_millis(100),..Fake::default()};

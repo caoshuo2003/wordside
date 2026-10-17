@@ -1,7 +1,7 @@
 // Development-only compatibility fixtures. All pages are synthetic, not scraped entries.
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict'),zlib=require('node:zlib');
 const root=path.resolve(__dirname,'..'),moduleRoot=path.join(root,'modules/cambridge-dictionary-api');
-const {html,landing,suggestionPage}=require(path.join(moduleRoot,'tests/fixture'));
+const {html,landing,suggestionPage,phraseHtml,phraseEntry}=require(path.join(moduleRoot,'tests/fixture'));
 const {parseCambridgePage,parseCambridgeSuggestions}=require(path.join(moduleRoot,'dictionary/cambridge'));
 const {upstreamResult}=require(path.join(moduleRoot,'tests/upstream-oracle'));
 (async()=>{
@@ -19,6 +19,23 @@ const {upstreamResult}=require(path.join(moduleRoot,'tests/upstream-oracle'));
  const withBare=html.replace('</div></div></div><div class="daccord">',bare+'</div></div></div><div class="daccord">');
  await page('bare-english-definition',withBare);
  await page('complete-tail-comments',html+'\n<!-- synthetic --> \n');
+ // Extensions have explicit expected JSON: the unchanged upstream oracle did
+ // not support standalone phrase headings. Keep all ordinary oracle cases.
+ assert.deepEqual(JSON.parse(JSON.stringify(parseCambridgePage(phraseHtml))),phraseEntry);
+ pages.push({name:'standalone-phrase-entry',html:phraseHtml,entry:{...phraseEntry,verbs:[]},extension:true});
+ const mixed=html.replace('</body>',phraseHtml.match(/<body>([\s\S]*)<\/body>/)[1]+'</body>');
+ const mixedEntry={...JSON.parse(JSON.stringify(parseCambridgePage(html))),verbs:[]};
+ mixedEntry.pos.push('phrase');mixedEntry.definition.push({...phraseEntry.definition[0],id:2});
+ assert.deepEqual({...JSON.parse(JSON.stringify(parseCambridgePage(mixed))),verbs:[]},mixedEntry);
+ pages.push({name:'mixed-word-and-phrase',html:mixed,entry:mixedEntry,extension:true});
+ for(const [name,source]of [
+  ['phrase-truncated',phraseHtml.slice(0,-7)],
+  ['phrase-missing-def',phraseHtml.replace('class="def ddef_d db"','class="broken"')],
+  ['phrase-missing-example',phraseHtml.replace('class="eg deg"','class="broken"')],
+  ['phrase-outside-block',phraseHtml.replace('class="phrase-di-block dphrase-di-block"','class="broken"')],
+  ['phrase-outside-title',phraseHtml.replace('class="di-title"','class="broken"')]
+ ])await page(name,source);
+
  for(const [name,source]of [
   ['truncated',html.slice(0,-7)],['missing-def',html.replace('class="def ddef_d db"','class="broken"')],
   ['missing-body',html.replace('class="def-body ddef_b"','class="broken"')],['missing-example-text',html.replace('class="eg deg"','class="broken"')],
@@ -56,5 +73,5 @@ const {upstreamResult}=require(path.join(moduleRoot,'tests/upstream-oracle'));
  fs.writeFileSync(path.join(output,'native-cambridge.json'),JSON.stringify({origin:'Synthetic compatibility fixtures generated with existing parser and original upstream oracle',pages,suggestions},null,2)+'\n');
  fs.writeFileSync(path.join(output,'entry.html.gz'),zlib.gzipSync(html));
  fs.writeFileSync(path.join(output,'oversize.html.gz'),zlib.gzipSync('x'.repeat(4*1024*1024+1)));
- console.log(JSON.stringify({pages:pages.length,suggestions:suggestions.length,originalOracle:pages.filter(x=>x.entry).length}));
+ console.log(JSON.stringify({pages:pages.length,suggestions:suggestions.length,originalOracle:pages.filter(x=>x.entry&&!x.extension).length,extensions:pages.filter(x=>x.extension).length}));
 })().catch(error=>{console.error(error);process.exitCode=1;});
