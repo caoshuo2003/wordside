@@ -73,7 +73,9 @@ jobs:
             'capture::windows::tests::',
             'capture::compatibility::tests::',
             'capture::selection::tests::',
-            'capture::probe::protocol_tests::'
+            'capture::probe::protocol_tests::',
+            'capture::windows_edit::tests::',
+            'dismissal::tests::'
           )
           foreach ($filter in $filters) {
             ./tools/windows-cargo.ps1 -Action test -TestFilter $filter

@@ -6,8 +6,8 @@ use std::os::windows::{process::CommandExt,io::AsRawHandle};
 use ::windows::{core::Interface,Win32::{Foundation::{CloseHandle,HANDLE},System::{Com::{CoInitializeEx,CoUninitialize,CoCreateInstance,COINIT_MULTITHREADED,CLSCTX_INPROC_SERVER},JobObjects::{CreateJobObjectW,SetInformationJobObject,AssignProcessToJobObject,JOBOBJECT_EXTENDED_LIMIT_INFORMATION,JobObjectExtendedLimitInformation,JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE}},UI::Accessibility::{IUIAutomation,IUIAutomation2,CUIAutomation}}};
 const PREFIX:&str="WORDSIDEPROBE ";
 #[derive(Clone,Serialize,Deserialize)]pub struct ProbeRequest{pub serial:u64,pub text:TextRequest}
-#[derive(Serialize,Deserialize)]pub struct ProbeResult{pub serial:u64,pub selection:Selection,#[serde(default,skip_serializing_if="Option::is_none")]pub clipboard_sequence:Option<u32>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_failure:Option<super::windows_copy::BackupFailure>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_ole_formats:Option<usize>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_restore:Option<super::windows_copy::RestoreState>}
-impl ProbeResult{fn selection(serial:u64,selection:Selection)->Self{Self{serial,selection,clipboard_sequence:None,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}}}
+#[derive(Serialize,Deserialize)]pub struct ProbeResult{pub serial:u64,pub selection:Selection,#[serde(default)]pub retryable:bool,#[serde(default)]native_verified:bool,#[serde(default,skip_serializing_if="Option::is_none")]pub clipboard_sequence:Option<u32>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_failure:Option<super::windows_copy::BackupFailure>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_ole_formats:Option<usize>,#[serde(default,skip_serializing_if="Option::is_none")]clipboard_restore:Option<super::windows_copy::RestoreState>}
+impl ProbeResult{fn selection(serial:u64,selection:Selection)->Self{Self{serial,selection,retryable:false,native_verified:false,clipboard_sequence:None,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}}}
 struct Job(HANDLE);
 impl Job{
  fn own(child:&Child)->Result<Self,String>{unsafe{
@@ -51,13 +51,36 @@ impl Helper{
    }
   }
  }
- fn execute(&mut self,request:&ProbeRequest,latest:&AtomicU64,timeout:Duration)->Option<Selection>{self.exchange(request,latest,timeout).map(|reply|reply.selection)}
+ #[cfg(test)] fn execute(&mut self,request:&ProbeRequest,latest:&AtomicU64,timeout:Duration)->Option<Selection>{self.exchange(request,latest,timeout).map(|reply|reply.selection)}
 }
 impl Drop for Helper{fn drop(&mut self){self._job.take();let _=self.child.kill();let _=self.child.wait();if let Some(reader)=self.reader.take(){let _=reader.join();}}}
-struct Work { request: ProbeRequest, guard: Option<(Arc<AtomicU64>,u64)>, release: Option<super::timing::Activity>, verify: bool, deadline: Option<Instant> }
+struct Work { request: ProbeRequest, guard: Option<(Arc<AtomicU64>,u64)>, release: Option<super::timing::Activity>, verify: bool, deadline: Option<Instant>, point:Option<(i32,i32)> }
 fn observation_budget(deadline: Option<Instant>, now: Instant) -> Option<Duration> {
  let remaining=deadline?.saturating_duration_since(now);
  (!remaining.is_zero()).then_some(remaining.min(Duration::from_millis(200)))
+}
+fn retry_allowed(selection: &Selection, input_attempted: bool) -> bool {
+ // A new provider/helper must pass every protection and source check again.
+ // A failed read itself never grants permission to copy.
+ !input_attempted && matches!(selection,Selection::NoSelection|Selection::SourceMismatch|Selection::Timeout|Selection::ReadError(_))
+}
+// Resolve read-only provider paths before a single optional copy transaction.
+fn read_provider(request:&ProbeRequest, point:Option<(i32,i32)>, current:impl Fn()->bool,
+ mut read:impl FnMut(&ProbeRequest)->Option<ProbeResult>)->Option<ProbeResult> {
+ if !current(){return None;}
+ let focused=read(request)?;
+ if !current(){return None;}
+ if let Some((x,y))=point.filter(|_|matches!(request.text.origin,super::windows_text::TextOrigin::Focused)
+     && matches!(focused.selection,Selection::Unsupported|Selection::Unreported)) {
+  let mut pointer=request.clone();pointer.text.origin=super::windows_text::TextOrigin::Pointer(x,y);
+  let answer=read(&pointer)?;
+  if !current(){return None;}
+  // A second provider finding no range cannot erase a positively read-only
+  // document's unreported selection. It still needs the one copy check.
+  // Explicit protection/source/access failures remain authoritative.
+  return Some(if matches!(answer.selection,Selection::NoSelection|Selection::Unsupported|Selection::Unreported) {focused}else{answer});
+ }
+ Some(focused)
 }
 #[derive(Default)]struct Mailbox{pending:Option<Work>,observed:Option<Work>,closed:bool}
 pub struct Worker{mailbox:Arc<(Mutex<Mailbox>,Condvar)>,latest:Arc<AtomicU64>,observed_latest:Arc<AtomicU64>,observations:Receiver<ProbeResult>,join:Option<JoinHandle<()>>}
@@ -83,9 +106,10 @@ impl Worker{
     if active.load(Ordering::SeqCst)!=request.serial || work_item.guard.as_ref().is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)!=*expected){continue;}
     let started=Instant::now();
     if observing && observation_budget(work_item.deadline,started).is_none(){continue;}
-    let mut report=super::diagnostics::FailureReport::new();
+    let mut report=super::diagnostics::FailureReport::new();let mut input_attempted=false;
     if helper.is_none(){match Helper::spawn(&program,&args){Ok(value)=>helper=Some(value),Err(error)=>{
-     let reply=ProbeResult::selection(request.serial,Selection::ReadError(error));
+     let mut reply=ProbeResult::selection(request.serial,Selection::ReadError(error));
+     reply.retryable=!observing && work_item.verify && retry_allowed(&reply.selection,false);
      if !observing {report.provider="read_error";report.finish(&recorder,Some(&reply.selection),started);}
      let _=if observing {observed_tx.send(reply)}else{tx.send(reply)};continue;
     }}}
@@ -101,10 +125,12 @@ impl Worker{
      }
      continue;
     }
-    let mut outcome=helper.as_mut().unwrap().execute(&request,&current,timeout.saturating_sub(started.elapsed()));
+    let provider=read_provider(&request,work_item.point,||current.load(Ordering::SeqCst)==request.serial && work_item.guard.as_ref().is_none_or(|(generation,expected)|generation.load(Ordering::SeqCst)==*expected),|request|helper.as_mut().unwrap().exchange(request,&current,timeout.saturating_sub(started.elapsed())));
+    let native_verified=provider.as_ref().is_some_and(|reply|reply.native_verified);
+    let mut outcome=provider.map(|reply|reply.selection);
     if outcome.is_none()||matches!(outcome,Some(Selection::Timeout|Selection::ReadError(_))){helper=None;}
     report.provider=super::diagnostics::code(outcome.as_ref());
-    if work_item.verify && outcome.as_ref().is_some_and(super::copy_policy::should_verify) {
+    if work_item.verify && !native_verified && outcome.as_ref().is_some_and(super::copy_policy::should_verify) {
      let valid=||current.load(Ordering::SeqCst)==request.serial && work_item.guard.as_ref()
       .is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)==*expected);
      // Backup collection can itself invoke delayed rendering in another app.
@@ -142,6 +168,7 @@ impl Worker{
        if state.is_none(){backup_helper=None;}
        state
       });
+      input_attempted=verified.diagnostics.input_attempted();
       report.copy=Some(verified.diagnostics);verified.selection
      }else{
       let failure=prepared.map(|reply|reply.selection);
@@ -150,16 +177,25 @@ impl Worker{
      };
     }
     report.finish(&recorder,outcome.as_ref(),started);
-    if current.load(Ordering::SeqCst)==request.serial{if let Some(selection)=outcome{let _=tx.send(ProbeResult::selection(request.serial,selection));}}
+    // A source/focus check can reject a copy between coordinator polls. If
+    // this serial is still current, silence would strand its awaiting request.
+    // A superseded request or invalid input guard may be discarded; an
+    // otherwise current request must always receive a terminal reply.
+    if current.load(Ordering::SeqCst)==request.serial {
+     let mut reply=ProbeResult::selection(request.serial,outcome.unwrap_or(Selection::SourceMismatch));
+     reply.retryable=work_item.verify && retry_allowed(&reply.selection,input_attempted);
+     let _=tx.send(reply);
+    }
    }
   });
   (Self{mailbox,latest,observed_latest,observations,join:Some(join)},answers)
  }
- #[cfg(test)]pub fn submit(&self,request:ProbeRequest){self.enqueue(Work{request,guard:None,release:None,verify:false,deadline:None});}
- pub fn submit_verified(&self,request:ProbeRequest,guard:Option<(Arc<AtomicU64>,u64)>,release:Option<super::timing::Activity>){self.enqueue(Work{request,verify:guard.is_some(),guard,release,deadline:None});}
+ #[cfg(test)]pub fn submit(&self,request:ProbeRequest){self.enqueue(Work{request,guard:None,release:None,verify:false,deadline:None,point:None});}
+ #[cfg(test)] pub fn submit_verified(&self,request:ProbeRequest,guard:Option<(Arc<AtomicU64>,u64)>,release:Option<super::timing::Activity>){self.submit_verified_at(request,guard,release,None);}
+ pub fn submit_verified_at(&self,request:ProbeRequest,guard:Option<(Arc<AtomicU64>,u64)>,release:Option<super::timing::Activity>,point:Option<(i32,i32)>){self.enqueue(Work{request,verify:guard.is_some(),point,guard,release,deadline:None});}
  pub fn observe_clipboard(&self,text:TextRequest,guard:Option<(Arc<AtomicU64>,u64)>,deadline:Instant)->u64 {
   let mut mailbox=self.mailbox.0.lock().unwrap();let serial=self.observed_latest.fetch_add(1,Ordering::SeqCst).wrapping_add(1);
-  mailbox.observed=Some(Work{request:ProbeRequest{serial,text},guard,release:None,verify:false,deadline:Some(deadline)});self.mailbox.1.notify_one();serial
+  mailbox.observed=Some(Work{request:ProbeRequest{serial,text},guard,release:None,verify:false,deadline:Some(deadline),point:None});self.mailbox.1.notify_one();serial
  }
  pub fn observed(&self)->impl Iterator<Item=ProbeResult>+'_ {self.observations.try_iter()}
  pub fn cancel_observed(&self,serial:u64) {
@@ -184,7 +220,7 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
    let reply=match request.text.origin {
     super::windows_text::TextOrigin::Backup=>{
      let clipboard_failure=match super::windows_copy::Backup::take(){Ok(value)=>{backup=Some(value);None},Err(error)=>{backup=None;Some(error)}};
-     ProbeResult{serial:request.serial,selection:if backup.is_some(){Selection::NoSelection}else{Selection::ClipboardUnavailable},clipboard_sequence:backup.as_ref().map(|value|value.before),clipboard_failure,clipboard_ole_formats:backup.as_ref().map(|value|value.ole_formats),clipboard_restore:None}
+     ProbeResult{serial:request.serial,retryable:false,native_verified:false,selection:if backup.is_some(){Selection::NoSelection}else{Selection::ClipboardUnavailable},clipboard_sequence:backup.as_ref().map(|value|value.before),clipboard_failure,clipboard_ole_formats:backup.as_ref().map(|value|value.ole_formats),clipboard_restore:None}
     },
     super::windows_text::TextOrigin::Restore(sequence)=>{
      let state=backup.take().and_then(|mut value|value.restore(sequence,&request.text).ok());
@@ -195,9 +231,14 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
      let copied=if matches!(request.text.origin,super::windows_text::TextOrigin::ObservedClipboard(_)) {
       super::windows_copy::read_observed(&request.text,sequence)
      }else{super::windows_copy::read_copied(&request.text,sequence)};
-     ProbeResult{serial:request.serial,selection:copied.selection,clipboard_sequence:copied.sequence,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}
+     ProbeResult{serial:request.serial,retryable:false,native_verified:false,selection:copied.selection,clipboard_sequence:copied.sequence,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}
     },
     _=>{
+     let native=super::windows_text::native_selection(&request.text);
+     if let Some(selection)=native {
+      let mut reply=ProbeResult::selection(request.serial,selection);
+      reply.native_verified=matches!(reply.selection,Selection::Word(_)); reply
+     }else {
      if automation.is_none(){
       if !com_initialized { if CoInitializeEx(None,COINIT_MULTITHREADED).is_ok(){com_initialized=true;}else{break;} }
       if let Ok(created)=CoCreateInstance::<_,IUIAutomation>(&CUIAutomation,None,CLSCTX_INPROC_SERVER){
@@ -206,6 +247,7 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest)->Selection){unsafe{
       }
      }
      ProbeResult::selection(request.serial,match automation.as_ref(){Some(automation)=>read(automation,&request.text),None=>Selection::ReadError("Start selection automation".into())})
+     }
     },
    };
    let Ok(json)=serde_json::to_string(&reply)else{break;};let mut output=std::io::stdout().lock();if writeln!(output,"{PREFIX}{json}").and_then(|_|output.flush()).is_err(){break;}
@@ -244,6 +286,8 @@ pub fn helper_entry()->bool{if std::env::args().nth(1).as_deref()!=Some("--words
    let request:ProbeRequest=serde_json::from_str(&line.unwrap()).unwrap();
    if request.text.pid==u32::MAX{thread::sleep(Duration::from_secs(60));}
    let mut reply=ProbeResult::selection(request.serial,Selection::Word("runtime".into()));
+   if request.text.pid==42 {reply.native_verified=true;}
+   if request.text.pid==43 {reply.selection=Selection::ReadError("Synthetic provider restart".into());}
    match request.text.origin{
     TextOrigin::Backup=>{reply.selection=Selection::NoSelection;reply.clipboard_sequence=Some(77);},
     TextOrigin::Restore(sequence)=>{reply.selection=Selection::NoSelection;reply.clipboard_restore=Some(if sequence.is_some(){super::super::windows_copy::RestoreState::Restored}else{super::super::windows_copy::RestoreState::Skipped});},
@@ -251,6 +295,91 @@ pub fn helper_entry()->bool{if std::env::args().nth(1).as_deref()!=Some("--words
     _=>{},
    }
    println!("{PREFIX}{}",serde_json::to_string(&reply).unwrap());std::io::stdout().flush().unwrap();
+  }
+ }
+ #[test] fn manual_provider_empty_pointer_preserves_document_verification_but_not_denials() {
+  for first in [Selection::Unreported,Selection::Unsupported] {
+   for second in [Selection::NoSelection,Selection::Unsupported,Selection::Unreported] {
+    let request=request(1,42,TextOrigin::Focused);let mut calls=0;
+    let result=read_provider(&request,Some((40,10)),||true,|request|{calls+=1;Some(ProbeResult::selection(request.serial,if calls==1 {first.clone()}else{second.clone()}))}).unwrap();
+    assert_eq!(calls,2);assert_eq!(result.selection,first);assert!(super::super::copy_policy::should_verify(&result.selection));
+   }
+   for denied in [Selection::Protected,Selection::AccessDenied,Selection::SourceMismatch,Selection::InvalidWord] {
+    let request=request(1,42,TextOrigin::Focused);let mut calls=0;
+    let result=read_provider(&request,Some((40,10)),||true,|request|{calls+=1;Some(ProbeResult::selection(request.serial,if calls==1 {first.clone()}else{denied.clone()}))}).unwrap();
+    assert_eq!(result.selection,denied,"pointer refusal cannot be replaced by the earlier result");
+   }
+  }
+ }
+ #[test] fn manual_provider_exact_selection_and_empty_editor_never_borrow_pointer() {
+  for first in [Selection::Word("runtime".into()),Selection::NoSelection,Selection::Protected,Selection::AccessDenied,Selection::SourceMismatch,Selection::InvalidWord] {
+   let request=request(1,42,TextOrigin::Focused);let mut calls=0;
+   let result=read_provider(&request,Some((40,10)),||true,|request|{calls+=1;Some(ProbeResult::selection(request.serial,first.clone()))}).unwrap();
+   assert_eq!(calls,1);assert_eq!(result.selection,first);
+  }
+ }
+ #[test] fn manual_provider_new_input_before_or_during_read_never_grants_pointer_or_copy() {
+  let request=request(1,42,TextOrigin::Focused);let mut calls=0;
+  assert!(read_provider(&request,Some((40,10)),||false,|_|{calls+=1;None}).is_none());assert_eq!(calls,0);
+  let current=std::cell::Cell::new(true);
+  assert!(read_provider(&request,Some((40,10)),||current.get(),|request|{calls+=1;current.set(false);Some(ProbeResult::selection(request.serial,Selection::Unsupported))}).is_none());
+  assert_eq!(calls,1);
+ }
+ #[test]fn manual_regression_bound_selection_position_is_read_before_copy(){
+  let request=request(1,42,TextOrigin::Focused); let mut paths=Vec::new();
+  let result=read_provider(&request,Some((40,10)),||true,|request|{
+   paths.push(request.text.origin);
+   let selection=if matches!(request.text.origin,TextOrigin::Pointer(40,10)){Selection::Word("runtime".into())}else{Selection::Unsupported};
+   Some(ProbeResult::selection(request.serial,selection))
+  }).unwrap();
+  assert_eq!(result.selection,Selection::Word("runtime".into()),"manual lookup must use the same authorized selection position as automatic lookup, before copying");
+  assert_eq!(paths.len(),2);
+ }
+ #[test]fn capture_race_native_selection_completes_without_clipboard_backup_or_input(){
+  let(worker,answers)=Worker::start(std::env::current_exe().unwrap(),arguments(),Duration::from_millis(300),Duration::from_millis(300));
+  // HWND=0 would reject a real copy transaction; native provenance must keep
+  // this path independent of any backup, clipboard state or synthetic input.
+  worker.submit_verified(request(1,42,TextOrigin::Focused),Some((Arc::new(AtomicU64::new(0)),0)),None);
+  let reply=answers.recv_timeout(Duration::from_secs(3)).unwrap();
+  assert_eq!(reply.selection,Selection::Word("runtime".into())); assert!(!reply.retryable);
+ }
+ #[test]fn notepad_regression_source_rejection_completes_the_current_request_without_a_second_hotkey(){
+  let(worker,answers)=Worker::start(std::env::current_exe().unwrap(),arguments(),Duration::from_millis(300),Duration::from_millis(300));
+  let generation=Arc::new(AtomicU64::new(0));
+  // The private peer supplies a synthetic backup. PID zero makes the native
+  // transaction reject before sending input or accessing the system clipboard.
+  worker.submit_verified(request(1,0,TextOrigin::Focused),Some((generation.clone(),0)),Some(super::super::timing::Activity::default()));
+  let reply=answers.recv_timeout(Duration::from_secs(3)).expect("an unchanged serial must receive a terminal result after source rejection");
+  assert_eq!(reply.serial,1); assert_eq!(reply.selection,Selection::SourceMismatch); assert!(reply.retryable,"source rejection before copying can be re-read");
+  worker.submit(request(2,1,TextOrigin::Focused));
+  assert_eq!(answers.recv_timeout(Duration::from_secs(3)).unwrap().selection,Selection::Word("runtime".into()));
+ }
+ #[test]fn zotero_regression_provider_error_can_restart_without_copy_authorization(){
+  let(worker,answers)=Worker::start(std::env::current_exe().unwrap(),arguments(),Duration::from_millis(300),Duration::from_millis(300));
+  let guard=Arc::new(AtomicU64::new(0));
+  worker.submit_verified(request(1,43,TextOrigin::Focused),Some((guard.clone(),0)),None);
+  let reply=answers.recv_timeout(Duration::from_secs(3)).unwrap();
+  assert!(matches!(reply.selection,Selection::ReadError(_)));
+  assert!(reply.retryable,"a provider failure before any copy may be read once again");
+  assert!(!super::super::copy_policy::should_verify(&reply.selection),"the error itself must never authorize a copy");
+  worker.submit_verified(request(2,42,TextOrigin::Focused),Some((guard,0)),None);
+  let reply=answers.recv_timeout(Duration::from_secs(3)).unwrap();
+  assert_eq!(reply.selection,Selection::Word("runtime".into()));assert!(!reply.retryable);
+ }
+ #[test]fn zotero_regression_helper_start_failure_has_a_terminal_retryable_reply(){
+  let absent=std::env::current_exe().unwrap().with_file_name("wordside-absent-synthetic-helper.exe");assert!(!absent.exists());
+  let(worker,answers)=Worker::start(absent,vec![],Duration::from_millis(300),Duration::from_millis(300));
+  worker.submit_verified(request(1,43,TextOrigin::Focused),Some((Arc::new(AtomicU64::new(0)),0)),None);
+  let reply=answers.recv_timeout(Duration::from_secs(3)).unwrap();
+  assert!(matches!(reply.selection,Selection::ReadError(_)));assert!(reply.retryable);
+ }
+ #[test]fn notepad_regression_copy_attempts_never_authorize_another_transaction(){
+  for selection in [Selection::NoSelection,Selection::SourceMismatch,Selection::Timeout,Selection::ReadError("provider".into())] {
+   assert!(retry_allowed(&selection,false));
+   assert!(!retry_allowed(&selection,true),"a copied/partially copied/timed-out read must never repeat the copy or backup");
+  }
+  for selection in [Selection::Protected,Selection::AccessDenied,Selection::InvalidWord,Selection::ClipboardRestoreFailed,Selection::CopyUnavailable] {
+   assert!(!retry_allowed(&selection,false));
   }
  }
  #[test]fn restore_peer_preserves_completed_and_safely_skipped_states(){

@@ -39,22 +39,22 @@ PR 的实际 CI 通过后合入 main，确认工作树干净并创建 annotated 
 ```sh
 git switch main
 git pull --ff-only
-git tag -a v0.1.1 -m "WordSide 0.1.1"
-git push origin v0.1.1
+git tag -a v0.1.2 -m "WordSide 0.1.2"
+git push origin v0.1.2
 ```
 
-例子使用下一次修复版本；已有标签不覆盖、不移动，也不推送本机所有历史标签。
+以上以 v0.1.2 为例；已有标签不覆盖、不移动，也不推送本机所有历史标签。
 
 ## 4 · 发布并核对
 
 GitHub CLI 已登录且具有仓库发布权限时，可运行：
 
 ```sh
-gh release create v0.1.1 --repo caoshuo2003/wordside \
+gh release create v0.1.2 --repo caoshuo2003/wordside \
   --verify-tag --latest \
-  --title "WordSide · 词伴 0.1.1" --notes-file docs/releases/v0.1.1.md \
-  release/v0.1.1/WordSide_0.1.1.exe release/v0.1.1/WordSide_0.1.1_x64-setup.exe \
-  release/v0.1.1/WordSide_0.1.1-portable.zip release/v0.1.1/THIRD-PARTY-LICENSES_0.1.1.txt
+  --title "WordSide · 词伴 0.1.2" --notes-file docs/releases/v0.1.2.md \
+  release/v0.1.2/WordSide_0.1.2.exe release/v0.1.2/WordSide_0.1.2_x64-setup.exe \
+  release/v0.1.2/WordSide_0.1.2-portable.zip release/v0.1.2/THIRD-PARTY-LICENSES_0.1.2.txt
 ```
 
 发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。正式版使用 `--latest` 作为默认下载版本；提前试用的版本使用 `--prerelease --latest=false`。发布说明如实记录已完成的检查与已知限制。

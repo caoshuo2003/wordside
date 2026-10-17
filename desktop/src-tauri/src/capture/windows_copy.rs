@@ -249,59 +249,77 @@ fn payload_equal(id:u32, left:&[u8], right:&[u8])->bool {
     }
 }
 fn native_payload(saved:Format, source:Handle, bytes:&mut usize)->Result<Format,BackupFailure> {
+    // A provider may expose a complete static representation only through OLE.
+    // Keep that owned copy when the native API has no handle and no explicit
+    // access error. The enclosing snapshot still checks sequence and owner.
+    // No format, including enterprise metadata, is omitted or replaced by NULL.
+    if source==0 && unsafe{GetLastError()}==0 {return Ok(saved);}
     verify_payload(&saved,source)?;
     let id=saved.id; *bytes=bytes.saturating_sub(saved.bytes); drop(saved);
     // Keep the original native allocation, including application-owned padding.
     snapshot_format(id,source,bytes)
 }
 pub(super) struct Backup { pub before: u32, pub ole_formats: usize, formats: Vec<Format>, owner: Owner }
+fn coherent_snapshot<T>(result:Result<T,BackupFailure>, unchanged:bool)->Result<T,BackupFailure> {
+    if unchanged {result} else {Err(failure(BackupStage::SourceChanged,None,false))}
+}
+fn needs_ole_retry(error:&BackupFailure)->bool {
+    error.stage==BackupStage::ReadFormat && error.format_id.is_some_and(|id|id>=0xc000)
+        && error.win32_error.is_none() && error.hresult.is_none()
+}
 impl Backup {
     pub fn take() -> Result<Self, BackupFailure> {
-        super::timing::stable_backup(Self::take_once, |failure|matches!(failure.stage,BackupStage::SourceChanged|BackupStage::OpenClipboard))
+        super::timing::stable_backup(||{
+            match Self::take_once(false) {
+                Err(error) if needs_ole_retry(&error)=>Self::take_once(true),
+                result=>result,
+            }
+        }, |failure|matches!(failure.stage,BackupStage::SourceChanged|BackupStage::OpenClipboard))
     }
-    fn take_once() -> Result<Self, BackupFailure> {
+    fn take_once(force_ole:bool) -> Result<Self, BackupFailure> {
         unsafe { SetLastError(0); }
         let owner = Owner::new().ok_or_else(|| failure(BackupStage::CreateOwner, None, true))?;
         let mut lock = ClipboardLock::open(owner.0, Duration::from_millis(80))
             .ok_or_else(|| failure(BackupStage::OpenClipboard, None, true))?;
-        let mut ids = enumerate_formats()?;
-        let mut bytes = 0;
-        let mut ole_formats = 0;
-        let mut formats = if ids.iter().copied().any(ole_transport) {
-            let sequence = unsafe { GetClipboardSequenceNumber() };
-            let source = unsafe { GetClipboardOwner() };
-            drop(lock); // OLE must open the clipboard itself; never call it under our lock.
-            let saved = ole::snapshot(sequence, source, &mut bytes)?;
-            lock = ClipboardLock::open(owner.0, Duration::from_millis(80))
-                .ok_or_else(|| failure(BackupStage::OpenClipboard, None, true))?;
-            if !ole::unchanged(sequence, source) { return Err(failure(BackupStage::SourceChanged, None, false)); }
-            ids = enumerate_formats()?;
-            ole_formats = saved.len();
-            saved
-        } else { Vec::new() };
-        let mut ordered = Vec::new();
-        for id in ids {
-            // OLE metadata describes the old provider, not the user's payload.
-            // Exclude it only after every declared static payload was materialized.
-            if ole_transport(id) { continue; }
-            unsafe { SetLastError(0); }
-            let source = unsafe { GetClipboardData(id) };
-            let value = if let Some(index) = formats.iter().position(|format| format.id == id) {
-                native_payload(formats.remove(index),source,&mut bytes)?
-            } else {
-                if ordered.len() + formats.len() >= MAX_FORMATS { return Err(failure(BackupStage::FormatLimit, None, false)); }
-                snapshot_format(id, source, &mut bytes)?
-            };
-            ordered.push(value);
-        }
-        // Keep original Win32 format priority; append only OLE-only payloads.
-        ordered.append(&mut formats); let formats = ordered;
-        // Delayed rendering may materialize formats while the clipboard is
-        // locked. Record its final sequence; no other application can replace
-        // the original data while this lock is held.
-        let before = unsafe { GetClipboardSequenceNumber() };
-        drop(lock);
-        Ok(Self { before, ole_formats, formats, owner })
+        let before=unsafe{GetClipboardSequenceNumber()};
+        let original_owner=unsafe{GetClipboardOwner()};
+        let result=(||{
+            let mut ids = enumerate_formats()?;
+            let mut bytes = 0;
+            let mut ole_formats = 0;
+            let mut formats = if force_ole || ids.iter().copied().any(ole_transport) {
+                drop(lock); // OLE must open the clipboard itself, never under our lock.
+                let saved = ole::snapshot(before, original_owner, &mut bytes)?;
+                lock = ClipboardLock::open(owner.0, Duration::from_millis(80))
+                    .ok_or_else(|| failure(BackupStage::OpenClipboard, None, true))?;
+                if !ole::unchanged(before, original_owner) { return Err(failure(BackupStage::SourceChanged, None, false)); }
+                ids = enumerate_formats()?;
+                ole_formats = saved.len();
+                saved
+            } else { Vec::new() };
+            let mut ordered = Vec::new();
+            for id in ids {
+                // OLE transport is replaced only after every declared static
+                // payload is materialized. All actual formats remain present.
+                if ole_transport(id) { continue; }
+                unsafe { SetLastError(0); }
+                let source = unsafe { GetClipboardData(id) };
+                let value = if let Some(index) = formats.iter().position(|format| format.id == id) {
+                    native_payload(formats.remove(index),source,&mut bytes)?
+                } else {
+                    if ordered.len() + formats.len() >= MAX_FORMATS { return Err(failure(BackupStage::FormatLimit, None, false)); }
+                    snapshot_format(id, source, &mut bytes)?
+                };
+                ordered.push(value);
+            }
+            // Keep original Win32 format priority; append only OLE-only payloads.
+            ordered.append(&mut formats); let formats = ordered;
+            drop(lock);
+            Ok(Self { before, ole_formats, formats, owner })
+        })();
+        // Native delayed rendering may advance the sequence without OLE markers.
+        // A changed snapshot is retried in full, including failures on stale IDs.
+        coherent_snapshot(result,ole::unchanged(before,original_owner))
     }
     pub fn restore(&mut self, expected: Option<u32>, request: &TextRequest) -> Result<RestoreState, ()> {
         let Some(sequence) = expected else { return Ok(RestoreState::Skipped); };
@@ -332,6 +350,40 @@ fn released() -> bool {
     // completely released before a copy chord can be sent.
     (1..256).all(|key| unsafe { GetAsyncKeyState(key) >= 0 })
 }
+// RegisterHotKey consumes the letter, so releasing Alt before that letter
+// can look like a bare Alt press to the source application. VK_E8 is currently
+// unassigned and normally has no editing action. Never release real modifiers
+// or send Escape. Only the hook thread sends/repairs this marked key.
+// https://github.com/AutoHotkey/AutoHotkeyDocs/blob/v2/docs/lib/A_MenuMaskKey.htm
+static MENU_KEY_PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn recover_menu_key(pending:&std::sync::atomic::AtomicBool,send_up:impl FnOnce()->u32)->bool {
+    use std::sync::atomic::Ordering;
+    if !pending.load(Ordering::SeqCst) {return true;}
+    if send_up()!=1 {return false;}
+    pending.store(false,Ordering::SeqCst);true
+}
+fn complete_menu_pair(sent:u32,pending:&std::sync::atomic::AtomicBool,send_up:impl FnOnce()->u32)->bool {
+    if sent==1 {
+        pending.store(true,std::sync::atomic::Ordering::SeqCst);
+        recover_menu_key(pending,send_up);
+    }
+    sent==2
+}
+fn send_menu_up()->u32 {
+    let up=key(0xe8,true,false);
+    unsafe {SendInput(1,&up,std::mem::size_of::<Input>() as i32)}
+}
+pub(super) fn recover_menu_mask()->bool {recover_menu_key(&MENU_KEY_PENDING,send_menu_up)}
+pub(super) fn mask_alt_menu(request: &TextRequest)->bool {
+    if !recover_menu_mask() || !source_current(request) || unsafe { GetAsyncKeyState(0x12) } >= 0 {return false;}
+    // A remapper may already use this unassigned key. It is not ours to release.
+    if unsafe { GetAsyncKeyState(0xe8) } < 0 {return false;}
+    let inputs=[key(0xe8,false,false),key(0xe8,true,false)];
+    let sent=unsafe {SendInput(inputs.len() as u32,inputs.as_ptr(),std::mem::size_of::<Input>() as i32)};
+    // Keep a failed own key-up pending so the input thread can retry it on its
+    // next refresh. A denied SendInput must not silently strand every lookup.
+    complete_menu_pair(sent,&MENU_KEY_PENDING,send_menu_up)
+}
 fn send_copy() -> bool {
     // Ctrl+Insert is the standard Windows copy chord and never sends Ctrl+C
     // (SIGINT) into a terminal that has no selection. No process-name allowlist.
@@ -354,6 +406,11 @@ pub(super) struct CopyDiagnostics {
     read_outcome: Option<&'static str>,
     restore_completed: Option<bool>,
     request_valid: bool,
+}
+impl CopyDiagnostics {
+    // Even a partial SendInput can have started a copy. Only None proves no
+    // copy was attempted, including when the final restore was safely skipped.
+    pub(super) fn input_attempted(&self) -> bool { self.input_sent.is_some() }
 }
 pub(super) struct VerifiedCopy {pub selection:Option<Selection>,pub diagnostics:CopyDiagnostics}
 struct NativeBackend<'a, V, L, R, C> {
@@ -429,7 +486,30 @@ fn read_text(request: &TextRequest, expected: u32, allow_unowned: bool) -> Copie
 
 #[cfg(test)]
 mod tests {
+    #[test] fn menu_mask_partial_send_is_remembered_until_our_keyup_succeeds() {
+        use std::sync::atomic::{AtomicBool,Ordering};
+        for sent in [0,2] {
+            let pending=AtomicBool::new(false);
+            assert_eq!(complete_menu_pair(sent,&pending,||panic!("no partial key to release")),sent==2);
+            assert!(!pending.load(Ordering::SeqCst));
+        }
+        let pending=AtomicBool::new(false);
+        assert!(!complete_menu_pair(1,&pending,||0));assert!(pending.load(Ordering::SeqCst));
+        assert!(!recover_menu_key(&pending,||0));assert!(pending.load(Ordering::SeqCst));
+        assert!(recover_menu_key(&pending,||1));assert!(!pending.load(Ordering::SeqCst));
+        assert!(recover_menu_key(&pending,||panic!("never release a key we did not press")));
+        assert!(!complete_menu_pair(1,&pending,||1));assert!(!pending.load(Ordering::SeqCst));
+    }
+
     use super::*;
+    #[test] fn notepad_regression_partial_copy_or_skipped_restore_cannot_be_retried() {
+        for input_sent in [None,Some(false),Some(true)] {
+            for restore_completed in [None,Some(false),Some(true)] {
+                let report=CopyDiagnostics{input_sent,restore_completed,..Default::default()};
+                assert_eq!(report.input_attempted(),input_sent.is_some());
+            }
+        }
+    }
     #[test] fn restoration_diagnostics_distinguish_completed_skipped_and_failed() {
         use super::super::copy_policy::Backend;
         let request=TextRequest{pid:0,window:0,focus:0,origin:super::super::windows_text::TextOrigin::Window};
@@ -467,6 +547,33 @@ mod tests {
             assert_eq!(std::slice::from_raw_parts(data, bytes.len()), bytes.as_slice());
             GlobalUnlock(copy.data);
         }
+    } }
+    #[test] fn capture_race_delayed_rendering_discards_partial_native_backup_before_copy() {
+        let stale=failure(BackupStage::ReadFormat,Some(49400),false);
+        assert_eq!(coherent_snapshot::<()>(Err(stale),false).unwrap_err().stage,BackupStage::SourceChanged);
+        assert_eq!(coherent_snapshot(Ok(42),false).unwrap_err().stage,BackupStage::SourceChanged);
+        assert_eq!(coherent_snapshot::<()>(Err(stale),true),Err(stale),"an unchanged unreadable format is not treated as empty");
+        assert!(needs_ole_retry(&stale));
+        assert!(!needs_ole_retry(&BackupFailure{win32_error:Some(5),..stale}),"explicit access denial is final");
+        assert!(!needs_ole_retry(&failure(BackupStage::UnsupportedFormat,Some(49400),false)));
+    }
+    #[test] fn capture_race_complete_ole_metadata_is_kept_when_native_handle_is_unavailable() { unsafe {
+        // Private memory only; no Get/SetClipboardData. The metadata format is
+        // retained with real bytes, not dropped or re-created as delayed NULL.
+        #[link(name="user32")] extern "system" {fn RegisterClipboardFormatW(name:*const u16)->u32;}
+        // Format IDs are assigned per Windows session. A hard-coded ID can
+        // become DataObject/OLE transport after another application registers
+        // formats. Reserve only this fixture's opaque metadata name.
+        let name:Vec<u16>="WordSide synthetic metadata fixture\0".encode_utf16().collect();
+        let id=RegisterClipboardFormatW(name.as_ptr());assert!(id>=0xc000);
+        let original=buffer(id,b"synthetic-identity\0"); let mut budget=0;
+        let saved=snapshot_format(original.id,original.data,&mut budget).unwrap();
+        SetLastError(0); let kept=native_payload(saved,0,&mut budget).unwrap();
+        assert_eq!(kept.id,id); assert_ne!(kept.data,0);
+        let bytes=GlobalLock(kept.data) as *const u8;
+        assert_eq!(std::slice::from_raw_parts(bytes,19),b"synthetic-identity\0"); GlobalUnlock(kept.data);
+        let saved=snapshot_format(original.id,original.data,&mut 0).unwrap();
+        SetLastError(5); assert!(native_payload(saved,0,&mut 0).is_err());
     } }
     #[test] fn replacing_an_ole_payload_reuses_its_budget_and_keeps_native_bytes() { unsafe {
         let original=buffer(13,&[b'a',0,0,0,0x11,0x22,0x33,0x44]);

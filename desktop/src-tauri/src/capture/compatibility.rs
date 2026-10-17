@@ -81,14 +81,20 @@ pub struct Intent { pub source: Source, pub x: i32, pub y: i32, pub pointer: boo
 pub struct Effect { pub invalidate: bool, pub lookup: Option<Intent> }
 struct Drag { source: Source, x: i32, y: i32, sequence: u32, double_click: bool, shift: bool }
 #[derive(Default)]
-pub struct Capture { pub recent: RecentSelection, drag: Option<Drag>, last_click: Option<(isize, i32, i32, Instant)> }
+pub struct Capture { pub recent: RecentSelection, drag: Option<Drag>, last_click: Option<(isize, i32, i32, Instant)>, selection:Option<(Intent,Instant)> }
 impl Capture {
-    pub fn clear(&mut self) { self.recent.clear(); self.drag = None; self.last_click = None; }
+    pub fn clear(&mut self) { self.recent.clear(); self.drag = None; self.last_click = None; self.selection=None; }
+    // Coordinates only, never retained dictionary text. Ordinary input, another
+    // press, a different control or expiry invalidates this pointer evidence.
+    pub fn selection_point(&self,source:Source,now:Instant)->Option<(i32,i32)> {
+        self.selection.as_ref().filter(|(intent,at)|intent.source==source && now.checked_duration_since(*at).is_some_and(|age|age<=RETENTION))
+            .map(|(intent,_)|(intent.x,intent.y))
+    }
     pub fn manual(&mut self) { self.drag = None; self.last_click = None; }
     pub fn input(&mut self, input: Input, source: Source, automatic: bool, double_time: Duration) -> Effect {
         match input {
             Input::Down { window, x, y, sequence, shift, at } => {
-                self.recent.clear(); self.drag = None;
+                self.recent.clear(); self.drag = None; self.selection=None;
                 if window == source.window && source.pid != 0 {
                     let double_click = self.last_click.is_some_and(|(old, px, py, time)| old == window
                         && at.saturating_duration_since(time) <= double_time
@@ -105,7 +111,8 @@ impl Capture {
                     return Effect::default();
                 }
                 self.recent.begin(source, drag.sequence, at);
-                Effect { invalidate: false, lookup: automatic.then_some(Intent { source, x, y, pointer: true }) }
+                let intent=Intent{source,x,y,pointer:true};self.selection=Some((intent,at));
+                Effect { invalidate: false, lookup: automatic.then_some(intent) }
             }
             Input::Copy { x, y, sequence, at } => {
                 self.clear();
@@ -131,6 +138,17 @@ mod tests {
     fn drag(capture: &mut Capture, automatic: bool, now: Instant) -> Effect {
         assert!(capture.input(Input::Down { window: 20, x: 10, y: 10, sequence: 7, shift: false, at: now }, source(), automatic, Duration::from_millis(500)).lookup.is_none());
         capture.input(Input::Up { window: 20, x: 40, y: 10, at: now + Duration::from_millis(10) }, source(), automatic, Duration::from_millis(500))
+    }
+    #[test] fn manual_position_requires_the_same_fresh_gesture_even_when_automatic_is_off() {
+        let at=Instant::now();let mut capture=Capture::default();drag(&mut capture,false,at);
+        capture.manual();let now=at+Duration::from_millis(100);
+        assert_eq!(capture.selection_point(source(),now),Some((40,10)));
+        for changed in [Source{focus:22,..source()},Source{pid:300,..source()},Source{window:30,..source()}] {assert!(capture.selection_point(changed,now).is_none());}
+        assert!(capture.selection_point(source(),at).is_none(),"a future event cannot authorize reading");
+        assert!(capture.selection_point(source(),at+Duration::from_secs(31)).is_none());
+        capture.input(Input::Changed,source(),false,Duration::from_millis(500));assert!(capture.selection_point(source(),now).is_none());
+        drag(&mut capture,false,at);capture.input(Input::Down{window:20,x:60,y:10,sequence:7,shift:false,at:now},source(),false,Duration::from_millis(500));
+        assert!(capture.selection_point(source(),now).is_none(),"even a same-source click clears prior selection evidence");
     }
     #[test] fn off_records_a_quick_selection_without_starting_lookup_and_manual_can_use_it() {
         let now = Instant::now(); let mut capture = Capture::default();

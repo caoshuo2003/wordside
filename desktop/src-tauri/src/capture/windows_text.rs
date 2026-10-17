@@ -117,11 +117,26 @@ unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,wind
  }
  if supported{Selection::NoSelection}else{Selection::Unsupported}
 }
+// Native ranges can be read without touching the clipboard or starting UIA.
+// Only a focused, same-root HWND is eligible, rechecked after the range read.
+pub fn native_selection(request: &TextRequest) -> Option<Selection> { unsafe {
+ if !matches!(request.origin,TextOrigin::Focused) || request.focus==0 {return None;}
+ let root=GetAncestor(request.window,2); let root=if root==0 {request.window}else{root};
+ let valid=||{
+  let mut source_pid=0; GetWindowThreadProcessId(root,&mut source_pid);
+  let foreground=GetForegroundWindow(); let active=GetAncestor(foreground,2);
+  request.pid!=0 && source_pid==request.pid && (if active==0 {foreground}else{active})==root
+   && focus_matches(root,request.focus) && GetAncestor(request.focus,2)==root
+ };
+ if !valid() {return Some(Selection::SourceMismatch);}
+ let selection=super::windows_edit::selected_edit(request.focus,root)?;
+ Some(if valid() {selection}else{Selection::SourceMismatch})
+} }
 pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
  unsafe{
   let root=GetAncestor(request.window,2);let root=if root==0{request.window}else{root};let mut source_pid=0;GetWindowThreadProcessId(root,&mut source_pid);
   if request.pid==0||source_pid!=request.pid{return Selection::SourceMismatch;}
-  if matches!(request.origin,TextOrigin::Focused){
+  if matches!(request.origin,TextOrigin::Focused|TextOrigin::Pointer(..)){
    let foreground=GetForegroundWindow();let active=GetAncestor(foreground,2);if (if active==0{foreground}else{active})!=root{return Selection::SourceMismatch;}
    if !focus_matches(root,request.focus){return Selection::SourceMismatch;}
    if request.focus!=0{let focus_root=GetAncestor(request.focus,2);if request.focus!=root&&focus_root!=root{return Selection::SourceMismatch;}}
@@ -138,8 +153,10 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
   match first{
    Ok(element)=>{
     let original=element.clone();let result=from_element(automation,element,request.window,if matches!(request.origin,TextOrigin::Focused){request.focus}else{0});
-    if matches!(request.origin,TextOrigin::Focused)&&result!=Selection::Protected{
+    if matches!(request.origin,TextOrigin::Focused|TextOrigin::Pointer(..))&&result!=Selection::Protected {
      if GetForegroundWindow()!=root||!focus_matches(root,request.focus){return Selection::SourceMismatch;}
+    }
+    if matches!(request.origin,TextOrigin::Focused)&&result!=Selection::Protected {
      let current=match automation.GetFocusedElement(){Ok(value)=>value,Err(error)=>return uia_error("Current focus",error)};
      match automation.CompareElements(&original,&current){Ok(value)if value.as_bool()=>{},Ok(_)=>return Selection::SourceMismatch,Err(error)=>return uia_error("Focus identity",error)}
     }
@@ -260,7 +277,7 @@ pub fn selected_text(automation:&IUIAutomation,request:&TextRequest)->Selection{
  #[test]fn ordinary_edit_unicode_filter_password_and_long_offsets(){unsafe{
   let fixture=ExternalFixture::new();
   let read=||super::super::windows_edit::selected_edit(fixture.rename,fixture.root).unwrap();
-  assert_eq!(super::super::windows_edit::selected_edit(fixture.edit,fixture.root),None,"RichEdit must retain the UIA route");
+  assert_eq!(super::super::windows_edit::selected_edit(fixture.edit,fixture.root),Some(Selection::Word("terminal".into())),"RichEdit has an exact native range and does not require clipboard verification");
   assert_eq!(super::super::windows_edit::selected_edit(fixture.rename,fixture.other),Some(Selection::SourceMismatch));
   assert_eq!(super::super::windows_edit::selected_edit(fixture.password,fixture.root),Some(Selection::Protected));
   for(value,start,end,expected)in [

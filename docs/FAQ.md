@@ -1,12 +1,12 @@
 # 常见问题
 
-[下载 WordSide · 词伴](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.1) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
+[下载 WordSide · 词伴](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.2) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
 
 ## 安装与运行
 
 **第一次使用应该下载哪个文件？**
 
-推荐 `WordSide_0.1.1_x64-setup.exe`，按提示安装即可。希望解压使用时，选择 `WordSide_0.1.1-portable.zip`，解压全部文件后运行其中的程序。
+推荐 `WordSide_0.1.2_x64-setup.exe`，按提示安装即可。希望解压使用时，选择 `WordSide_0.1.2-portable.zip`，解压全部文件后运行其中的程序。
 
 **为什么默认安装在 AppData\Local，而不是 Program Files？**
 
@@ -42,7 +42,7 @@ WordSide 可以为 Windows 桌面终端中的选词显示释义浮窗，具体�
 
 **选词会影响剪贴板吗？**
 
-WordSide 会临时复制选区来核对实际文字，随后尝试恢复原剪贴板；期间你新复制的内容优先保留。不能完整备份时，会保持当前内容并提示手动输入。临时复制可能被剪贴板历史或第三方工具记录，详细说明见[隐私与数据](PRIVACY.md#选区与剪贴板)。
+常见系统文本控件会直接读取选区；需要进一步核对的区域会临时复制选词，随后尝试恢复原剪贴板。期间你新复制的内容优先保留。不能完整备份时，会保持当前内容并提示手动输入。临时复制可能被剪贴板历史或第三方工具记录，详细说明见[隐私与数据](PRIVACY.md#选区与剪贴板)。
 
 这项校对依赖源应用支持标准 **Ctrl+Insert** 复制；不支持的区域可以手动输入。自动划词和快捷键采用相同处理方式。
 
@@ -69,7 +69,7 @@ WordSide 直接访问 [Cambridge Dictionary](https://dictionary.cambridge.org/)�
 ```powershell
 $env:HTTPS_PROXY = 'http://127.0.0.1:7890'
 $env:HTTP_PROXY = 'http://127.0.0.1:7890'
-& '.\WordSide_0.1.1.exe'
+& '.\WordSide_0.1.2.exe'
 ```
 
 先在托盘右键退出 WordSide，再进入 EXE 所在目录执行这些命令。它们只影响这个 PowerShell 窗口及从中启动的程序。
