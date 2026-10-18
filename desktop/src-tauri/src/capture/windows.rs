@@ -43,7 +43,10 @@ use super::{selection::Selection,probe::{Worker,ProbeRequest},hotkey::Driver};
         if payload.get("word").is_some()&&!focus_matches(source,focus){return true;}
         if input_guard.as_ref().is_some_and(|(generation,expected)|generation.load(Ordering::SeqCst)!=*expected){return true;}
         if compatibility.as_ref().is_some_and(|value|!value.valid_at(unsafe{GetClipboardSequenceNumber()},Instant::now())){return true;}
-        if !state.ready.load(Ordering::SeqCst)||(!manual&&!state.enabled.load(Ordering::SeqCst)){return true;}
+        if !manual&&!state.enabled.load(Ordering::SeqCst){return true;}
+        // Cold WebViews can finish after the first selection. Keep only the
+        // current, source-validated candidate until its listeners are ready.
+        if !state.ready.load(Ordering::SeqCst){return false;}
         if !publication_ready(release.as_ref()) || !sampled_released() { return false; }
         if let Some(window)=app.get_webview_window("popup"){
             if !state.pinned.load(Ordering::SeqCst) {
@@ -245,10 +248,14 @@ pub fn run(app: AppHandle) {
     let invalid = initial.as_ref().err().cloned(); let mut keys = Driver::new(state.hotkeys.clone(), initial.unwrap_or(None));
     if let Some(error) = invalid { state.hotkeys.set_error(error); }
     let _ = app.emit("native-state", crate::info(&state)); drop(state);
-    let observer = match Observer::new(keys.input_binding()) {
+    let mut observer = match Observer::new(keys.input_binding()) {
         Ok(value) => Some(value),
         Err(message) => { let _ = app.emit_to("main", "native-capture-feedback", serde_json::json!({"code":"capture_unavailable","message":message})); None }
     };
+    // Elevated windows and the secure desktop also bypass our hooks, so a
+    // re-arm that changes nothing is retried at most this often.
+    const REARM_INTERVAL: Duration = Duration::from_secs(30);
+    let mut rearmed: Option<Instant> = None;
     let (worker, answers) = Worker::new(app.state::<State>().config.with_file_name("capture-status.json")); let mut capture = Capture::default();
     let mut capture_generation = 0; let mut released=Released::default();
     let mut candidate: Option<Candidate> = None; let mut awaiting: Option<Awaiting> = None;
@@ -265,6 +272,14 @@ pub fn run(app: AppHandle) {
         Driver::wait(poll_interval(enabled, was_visible || awaiting.is_some() || candidate.is_some() || capture.recent.pending()));
         let visible = unsafe { IsWindowVisible(popup_hwnd) != 0 };
         let registered = keys.drain();let binding=keys.input_binding();
+        // Re-arm hooks that Windows removed (or never installed) only between
+        // requests: no guard, release fence or observation refers to the old one.
+        if observer.as_ref().is_none_or(Observer::stalled) && awaiting.is_none() && candidate.is_none() && observation.is_none()
+            && rearmed.is_none_or(|at| at.elapsed() >= REARM_INTERVAL) {
+            drop(observer.take()); rearmed = Some(Instant::now());
+            observer = Observer::new(binding).ok();
+            capture.clear(); capture_generation = 0; observed_attempt = None;
+        }
         if let Some(observer) = observer.as_ref() { observer.set_shortcut(keys.input_binding()); observer.refresh(); }
         let (lost, mut inputs) = observer.as_ref().map(Observer::drain).unwrap_or_default();
         let down = pressed(1); let copy = copy_chord(pressed(0x11), pressed(0x43), pressed(0x2D), pressed(0x12), pressed(0x5B) || pressed(0x5C));

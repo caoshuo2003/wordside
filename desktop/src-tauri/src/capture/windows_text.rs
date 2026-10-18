@@ -3,7 +3,7 @@ pub use super::selection::Selection;
 use serde::{Serialize,Deserialize};
 use std::ffi::c_void;
 use ::windows::Win32::{Foundation::{POINT,HWND},UI::Accessibility::{IUIAutomation,IUIAutomationElement,IUIAutomationTextPattern,IUIAutomationTextRange,UIA_TextPatternId,UIA_IsReadOnlyAttributeId,UIA_EditControlTypeId,UIA_DocumentControlTypeId}};
-#[derive(Clone,Copy,Serialize,Deserialize)]pub enum TextOrigin{Pointer(i32,i32),Focused,Clipboard(u32),ObservedClipboard(u32),Backup,Restore(Option<u32>),#[cfg(test)]Window}
+#[derive(Clone,Copy,Serialize,Deserialize)]pub enum TextOrigin{Pointer(i32,i32),Focused,Clipboard(u32),ObservedClipboard(u32),PebrelClipboard(u32),Backup,Restore(Option<u32>),PebrelRestore(Option<u32>),#[cfg(test)]Window}
 #[derive(Clone,Serialize,Deserialize)]pub struct TextRequest{pub pid:u32,pub window:isize,pub origin:TextOrigin,#[serde(default)]pub focus:isize}
 // Fixed classifications only: never persist element names, runtime IDs or text.
 #[derive(Clone,Copy,Debug,PartialEq,Eq,Serialize,Deserialize)]
@@ -94,6 +94,9 @@ unsafe fn read_only(range: &IUIAutomationTextRange) -> Option<bool> {
  (value.vt()==::windows::Win32::System::Variant::VT_BOOL).then(||bool::try_from(&value).ok()).flatten()
 }
 
+fn same_process(first:Handle,second:Handle)->bool{unsafe{
+ let(mut a,mut b)=(0u32,0u32);GetWindowThreadProcessId(first,&mut a);GetWindowThreadProcessId(second,&mut b);a!=0&&a==b
+}}
 // Verify the unfiltered ancestor path belongs to this source before reading text.
 // Browser renderers can have a different PID from the foreground root window.
 unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,window:Handle,original_focus:Handle,trace:&mut ProviderDiagnostics)->Selection{
@@ -105,7 +108,14 @@ unsafe fn from_element(automation:&IUIAutomation,first:IUIAutomationElement,wind
   trace.ancestor_count+=1;
   match cursor.CurrentIsPassword(){Ok(value)if value.as_bool()=>return Selection::Protected,Ok(_)=>{},Err(error)=>return uia_error("IsPassword",error,trace)}
   let native=match cursor.CurrentNativeWindowHandle(){
-   Ok(handle)=>{let native=handle.0 as isize;if native!=0{let ancestor=GetAncestor(native,2);if native!=root&&ancestor!=root{return trace.reject(ProviderRejection::AncestorForeignRoot);}}native},
+   Ok(handle)=>{let native=handle.0 as isize;if native!=0{let ancestor=GetAncestor(native,2);if native!=root&&ancestor!=root{
+    // Chromium can park its accessibility host under a hidden top-level window
+    // of its own process (Chrome right after UIA starts). That tree cannot prove
+    // which window owns the selection: read nothing from it, but the verified
+    // source focus may still be copied. Another process remains a mismatch.
+    if same_process(native,root){return Selection::Unsupported;}
+    return trace.reject(ProviderRejection::AncestorForeignRoot);
+   }}native},
    Err(error)=>return uia_error("NativeWindowHandle",error,trace),
   };
   elements.push((cursor.clone(),native));
@@ -178,7 +188,7 @@ pub fn selected_text_diagnosed(automation:&IUIAutomation,request:&TextRequest,tr
   let first=match request.origin{
    TextOrigin::Pointer(x,y)=>automation.ElementFromPoint(POINT{x,y}),
    TextOrigin::Focused=>automation.GetFocusedElement(),
-   TextOrigin::Clipboard(_)|TextOrigin::ObservedClipboard(_)|TextOrigin::Backup|TextOrigin::Restore(_)=>unreachable!("clipboard operations are dispatched before UIA"),
+   TextOrigin::Clipboard(_)|TextOrigin::ObservedClipboard(_)|TextOrigin::PebrelClipboard(_)|TextOrigin::Backup|TextOrigin::Restore(_)|TextOrigin::PebrelRestore(_)=>unreachable!("clipboard operations are dispatched before UIA"),
    #[cfg(test)]TextOrigin::Window=>automation.ElementFromHandle(HWND(request.window as *mut c_void)),
   };
   match first{
@@ -358,7 +368,15 @@ pub fn selected_text_diagnosed(automation:&IUIAutomation,request:&TextRequest,tr
    assert_eq!(selected_text(&automation,&TextRequest{pid:fixture.pid.wrapping_add(1),window:fixture.edit,origin:TextOrigin::Window,focus:0}),Selection::SourceMismatch,"stale process identity must be refused");
    assert_eq!(selected_text(&automation,&TextRequest{pid:fixture.pid,window:fixture.edit,origin:TextOrigin::Focused,focus:fixture.other}),Selection::SourceMismatch,"manual capture cannot borrow an inactive or foreign focus");
    let element=automation.ElementFromHandle(HWND(fixture.edit as *mut c_void)).unwrap();
-   assert_eq!(from_element(&automation,element,fixture.other,0,&mut ProviderDiagnostics::default()),Selection::SourceMismatch,"other source window must not borrow this selection");
+   let mut trace=ProviderDiagnostics::default();
+   assert_eq!(from_element(&automation,element,fixture.other,0,&mut trace),Selection::Unsupported,"a same-process foreign root lends no text; only a copy from the verified focus may read it");
+   assert_eq!(trace.rejected_at,None);
+   let local=Fixture::new();
+   let element=automation.ElementFromHandle(HWND(fixture.edit as *mut c_void)).unwrap();
+   let mut trace=ProviderDiagnostics::default();
+   assert_eq!(from_element(&automation,element,local.root,0,&mut trace),Selection::SourceMismatch,"another process's window must not borrow this selection");
+   assert_eq!(trace.rejected_at,Some(ProviderRejection::AncestorForeignRoot));
+   drop(local);
    assert_eq!(read(fixture.password),Selection::Protected);
    SendMessageW(fixture.edit,0xB1,0,0);
    // This fixture is ES_READONLY and exposes a Document TextPattern. An empty

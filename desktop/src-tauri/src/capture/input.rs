@@ -35,9 +35,11 @@ extern "system" {
     fn GetCursorPos(point: *mut Point) -> i32;
     fn GetClipboardSequenceNumber() -> u32;
     fn GetAsyncKeyState(key: i32) -> i16;
+    fn GetLastInputInfo(info: *mut LastInput) -> i32;
 }
 #[link(name="kernel32")]
-extern "system" { fn GetCurrentThreadId() -> u32; fn GetModuleHandleW(name: *const u16) -> isize; }
+extern "system" { fn GetCurrentThreadId() -> u32; fn GetModuleHandleW(name: *const u16) -> isize; fn GetTickCount() -> u32; }
+#[repr(C)] struct LastInput { size: u32, time: u32 }
 const WAKE: u32 = 0x8000 + 0x43;
 const REFRESH: u32 = 0x8000 + 0x44;
 const CAPACITY: usize = 64;
@@ -66,6 +68,19 @@ impl HeldKeys {
 }
 struct Context { shortcut_press: Option<u32>, repair_since: Option<Instant>, held: HeldKeys, activity: Activity, sender: SyncSender<Event>, capture_thread: u32, lost: Arc<AtomicBool>, modifiers: Modifiers, generation: Arc<AtomicU64>, shortcut: Arc<AtomicU64> }
 thread_local! { static CONTEXT: RefCell<Option<Context>> = const { RefCell::new(None) }; }
+// Windows silently removes a low-level hook whose callback once exceeds
+// LowLevelHooksTimeout (paging after a long idle, a busy boot) and never tells
+// the owner. Session input newer than every callback means the hooks are gone.
+thread_local! { static HEARD: RefCell<Option<Arc<AtomicU32>>> = const { RefCell::new(None) }; }
+const STALL_MS: i32 = 1000;
+fn hooks_stalled(heard: u32, input: u32) -> bool { input.wrapping_sub(heard) as i32 > STALL_MS }
+fn last_input() -> Option<u32> {
+    let mut info = LastInput { size: std::mem::size_of::<LastInput>() as u32, time: 0 };
+    (unsafe { GetLastInputInfo(&mut info) } != 0).then_some(info.time)
+}
+fn heard() {
+    HEARD.with(|cell| { if let Ok(heard) = cell.try_borrow() { if let Some(heard) = heard.as_ref() { heard.store(unsafe { GetTickCount() }, Ordering::Relaxed); } } });
+}
 // Only the hook's physical history can distinguish a real Ctrl press from
 // our tagged menu mask. Unknown history never authorizes releasing a key.
 pub(super) fn physical_controls_released() -> Option<(bool,bool)> {
@@ -125,6 +140,7 @@ fn send(context: &Context, event: Event) {
 }
 unsafe extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) -> isize {
     if code == 0 && lparam != 0 {
+        heard();
         let packet = &*(lparam as *const MousePacket);
         let message=wparam as u32;
         let kind=match message { 0x201=>Some(Kind::Down), 0x202=>Some(Kind::Up), 0x204|0x207|0x20B|0x20A|0x20E=>Some(Kind::Other), _=>None };
@@ -144,6 +160,7 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: usize, lparam: isize) ->
 }
 unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> isize {
     if code == 0 && lparam != 0 {
+        heard();
         let down = matches!(wparam as u32, 0x100 | 0x104);
         let up = matches!(wparam as u32, 0x101 | 0x105);
         if down || up {
@@ -178,7 +195,7 @@ unsafe extern "system" fn key_hook(code: i32, wparam: usize, lparam: isize) -> i
 }
 struct Hook(isize);
 impl Drop for Hook { fn drop(&mut self) { unsafe { UnhookWindowsHookEx(self.0); } } }
-pub struct Observer { events: Receiver<Event>, lost: Arc<AtomicBool>, stop: Arc<AtomicBool>, thread: u32, join: Option<JoinHandle<()>>, generation: Arc<AtomicU64>, shortcut: Arc<AtomicU64>, activity: Activity }
+pub struct Observer { events: Receiver<Event>, lost: Arc<AtomicBool>, stop: Arc<AtomicBool>, thread: u32, join: Option<JoinHandle<()>>, generation: Arc<AtomicU64>, shortcut: Arc<AtomicU64>, activity: Activity, heard: Arc<AtomicU32> }
 impl Observer {
     pub fn new(initial_shortcut: u64) -> Result<Self, String> {
         let capture_thread = unsafe { GetCurrentThreadId() };
@@ -188,9 +205,11 @@ impl Observer {
         let activity=Activity::default(); let hook_activity=activity.clone();
         let hook_generation = generation.clone(); let hook_shortcut = shortcut.clone();
         let hook_lost = lost.clone(); let hook_stop = stop.clone(); let hook_id = thread_id.clone();
+        let heard = Arc::new(AtomicU32::new(unsafe { GetTickCount() })); let hook_heard = heard.clone();
         let join = std::thread::spawn(move || unsafe {
             let mut message = Message::default(); PeekMessageW(&mut message, 0, 0, 0, 0);
             let thread = GetCurrentThreadId(); hook_id.store(thread, Ordering::SeqCst);
+            HEARD.with(|cell| *cell.borrow_mut() = Some(hook_heard.clone()));
             CONTEXT.with(|cell| *cell.borrow_mut() = Some(Context { shortcut_press: None, repair_since: None, held: HeldKeys::default(), activity: hook_activity, sender, capture_thread, lost: hook_lost, modifiers: Modifiers::default(), generation: hook_generation, shortcut: hook_shortcut }));
             let module = GetModuleHandleW(std::ptr::null());
             let mouse = SetWindowsHookExW(14, mouse_hook, module, 0);
@@ -209,6 +228,7 @@ impl Observer {
                     } }
                     context.held=held; context.modifiers=modifiers; context.activity.changed(context.held.count!=0);
                 } });
+                hook_heard.store(GetTickCount(), Ordering::SeqCst);
                 let _ = ready.send(Ok(thread));
                 while !hook_stop.load(Ordering::SeqCst) && GetMessageW(&mut message, 0, 0, 0) > 0 {
                     if message.message==REFRESH {
@@ -228,7 +248,7 @@ impl Observer {
             drop(keyboard); drop(mouse); CONTEXT.with(|cell| *cell.borrow_mut() = None);
         });
         match result.recv_timeout(Duration::from_secs(2)) {
-            Ok(Ok(thread)) => Ok(Self { events, lost, stop, thread, join: Some(join), generation, shortcut, activity }),
+            Ok(Ok(thread)) => Ok(Self { events, lost, stop, thread, join: Some(join), generation, shortcut, activity, heard }),
             response => {
                 stop.store(true, Ordering::SeqCst);
                 unsafe { PostThreadMessageW(thread_id.load(Ordering::SeqCst), 0x12, 0, 0); }
@@ -239,6 +259,11 @@ impl Observer {
         }
     }
     pub fn refresh(&self) { unsafe { PostThreadMessageW(self.thread,REFRESH,0,0); } }
+    /// The hooks missed newer session input, or their thread has exited.
+    pub fn stalled(&self) -> bool {
+        self.join.as_ref().is_some_and(JoinHandle::is_finished)
+            || last_input().is_some_and(|input| hooks_stalled(self.heard.load(Ordering::SeqCst), input))
+    }
     pub fn activity(&self) -> Activity { self.activity.clone() }
     pub fn generation(&self) -> u64 { self.generation.load(Ordering::SeqCst) }
     pub fn guard(&self) -> (Arc<AtomicU64>, u64) { (self.generation.clone(), self.generation()) }
@@ -259,6 +284,14 @@ impl Drop for Observer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn hooks_are_stalled_only_when_session_input_is_newer_than_every_callback() {
+        assert!(!hooks_stalled(5_000,5_000));
+        assert!(!hooks_stalled(5_000,4_000),"no input since the last callback proves nothing");
+        assert!(!hooks_stalled(5_000,5_900),"ordinary callback latency");
+        assert!(hooks_stalled(5_000,6_500));
+        assert!(hooks_stalled(u32::MAX-200,1_000),"the tick count wraps after 49.7 days");
+        assert!(!hooks_stalled(1_000,u32::MAX-200));
+    }
     #[test] fn menu_mask_physical_control_history_is_side_specific_and_unknown_is_not_up() {
         assert_eq!(physical_controls_released(),None);
         let (sender,_)=sync_channel(1);

@@ -22,6 +22,7 @@ extern "system" {
     fn GetForegroundWindow() -> Handle;
     fn GetAncestor(window: Handle, flags: u32) -> Handle;
     fn GetWindowThreadProcessId(window: Handle, pid: *mut u32) -> u32;
+    fn GetClassNameW(window: Handle, name: *mut u16, max: i32) -> i32;
     fn GetAsyncKeyState(key: i32) -> i16;
     fn SendInput(count: u32, inputs: *const Input, size: i32) -> u32;
     fn CreateWindowExW(ex: u32, class: *const u16, name: *const u16, style: u32,
@@ -31,6 +32,9 @@ extern "system" {
 }
 #[link(name = "kernel32")]
 extern "system" {
+    fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+    fn QueryFullProcessImageNameW(process: Handle, flags: u32, name: *mut u16, len: *mut u32) -> i32;
+    fn CloseHandle(handle: Handle) -> i32;
     fn GlobalSize(memory: Handle) -> usize;
     fn GlobalLock(memory: Handle) -> *mut c_void;
     fn GlobalUnlock(memory: Handle) -> i32;
@@ -83,6 +87,68 @@ fn source_current(request: &TextRequest) -> bool { source_rejection(request).is_
 fn source_owns(request: &TextRequest) -> bool {
     let owner = unsafe { GetClipboardOwner() };
     owner != 0 && (pid(owner) == request.pid || root(owner) == root(request.window))
+}
+// The standard path remains source-owned Ctrl+Insert. Pebrel 2.2.1 has no
+// TextPattern or Ctrl+Insert binding; its Ctrl+Shift+C publishes ownerless text.
+// Scope that compatibility to the verified process AND window class, never all
+// GPUI windows. A null owner is temporal correlation, not publisher identity.
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+enum CopyProfile { Standard, Pebrel }
+fn profile_identity(class:&str, image:&str)->CopyProfile {
+    let executable=image.rsplit(['\\','/']).next().unwrap_or_default();
+    if class=="Zed::Window" && executable.eq_ignore_ascii_case("pebrel.exe") {CopyProfile::Pebrel}
+    else {CopyProfile::Standard}
+}
+fn copy_profile(request:&TextRequest)->CopyProfile {
+    let window=root(request.window);
+    if request.pid==0 || pid(window)!=request.pid {return CopyProfile::Standard;}
+    let mut class=[0u16;128];
+    let count=unsafe{GetClassNameW(window,class.as_mut_ptr(),class.len() as i32)};
+    if count<=0 {return CopyProfile::Standard;}
+    let class=String::from_utf16_lossy(&class[..count as usize]);
+    if class!="Zed::Window" {return CopyProfile::Standard;}
+    let process=unsafe{OpenProcess(0x1000,0,request.pid)};
+    if process==0 {return CopyProfile::Standard;}
+    let mut image=[0u16;32768];let mut length=image.len() as u32;
+    let ok=unsafe{QueryFullProcessImageNameW(process,0,image.as_mut_ptr(),&mut length)};
+    unsafe{CloseHandle(process);}
+    if ok==0 {return CopyProfile::Standard;}
+    profile_identity(&class,&String::from_utf16_lossy(&image[..length as usize]))
+}
+#[derive(Clone,Copy,Debug,PartialEq,Eq)]
+pub(super) enum CopyAccess { SourceOwned, Pebrel }
+struct CopyAttempt {profile:CopyProfile, complete:bool, ownerless:Option<u32>, publication:Option<(u32,Duration)>}
+impl CopyAttempt {
+    fn new(profile:CopyProfile)->Self {Self{profile,complete:false,ownerless:None,publication:None}}
+    fn may_sample(&self,before:u32,hint:u32)->bool {
+        !self.complete || hint!=before
+    }
+    fn settled(&mut self,sequence:u32,now:Duration)->bool {
+        // Wait out observed null-owner sequence churn before attribution. GPUI
+        // writes its own formats under one lock; later changes are not assumed
+        // to be its writes. The reader still rejects any later sequence.
+        const QUIET:Duration=Duration::from_millis(40);
+        match self.publication {
+            Some((previous,since)) if previous==sequence=>now.saturating_sub(since)>=QUIET,
+            _=>{self.publication=Some((sequence,now));false}
+        }
+    }
+    fn observe(&mut self,before:u32,sequence:u32,unowned:bool,current:bool)->bool {
+        let accepted=self.profile==CopyProfile::Pebrel && self.complete && sequence!=before && unowned && current
+            && self.ownerless.is_none_or(|previous|previous==sequence);
+        if accepted && self.ownerless.is_none() {self.ownerless=Some(sequence);}
+        accepted
+    }
+    fn access(&self,sequence:Option<u32>)->CopyAccess {
+        if sequence.is_some() && sequence==self.ownerless {CopyAccess::Pebrel} else {CopyAccess::SourceOwned}
+    }
+    fn materialized(&mut self,before:u32,after:Option<u32>) {
+        if self.ownerless==Some(before) {if let Some(after)=after {self.ownerless=Some(after);}}
+    }
+}
+fn restore_owner(request:&TextRequest,access:CopyAccess)->bool {
+    source_owns(request) || access==CopyAccess::Pebrel
+        && copy_profile(request)==CopyProfile::Pebrel && unsafe{GetClipboardOwner()}==0
 }
 struct ClipboardLock;
 impl ClipboardLock {
@@ -329,14 +395,20 @@ impl Backup {
         coherent_snapshot(result,ole::unchanged(before,original_owner))
     }
     pub fn restore(&mut self, expected: Option<u32>, request: &TextRequest) -> Result<RestoreState, ()> {
+        self.restore_scoped(expected,request,CopyAccess::SourceOwned)
+    }
+    pub fn restore_scoped(&mut self, expected: Option<u32>, request: &TextRequest, access:CopyAccess) -> Result<RestoreState, ()> {
+        // Cleanup survives cancellation/foreground changes, but never a reused
+        // source identity or a newer clipboard publication.
+        if access==CopyAccess::Pebrel && copy_profile(request)!=CopyProfile::Pebrel {return Ok(RestoreState::Skipped);}
         let Some(sequence) = expected else { return Ok(RestoreState::Skipped); };
         let mut receipt = Receipt::new(self.before);
         receipt.observe(sequence, true, true);
         // New data from any application, including another copy in the same
         // process, always wins over our backup. Recheck under the clipboard lock.
-        if !receipt.restore_at(unsafe { GetClipboardSequenceNumber() }, source_owns(request)) { return Ok(RestoreState::Skipped); }
+        if !receipt.restore_at(unsafe { GetClipboardSequenceNumber() }, restore_owner(request,access)) { return Ok(RestoreState::Skipped); }
         let _lock = ClipboardLock::open(self.owner.0, Duration::from_millis(500)).ok_or(())?;
-        if !receipt.restore_at(unsafe { GetClipboardSequenceNumber() }, source_owns(request)) { return Ok(RestoreState::Skipped); }
+        if !receipt.restore_at(unsafe { GetClipboardSequenceNumber() }, restore_owner(request,access)) { return Ok(RestoreState::Skipped); }
         if unsafe { EmptyClipboard() } == 0 { return Err(()); }
         let end = Instant::now() + Duration::from_millis(100);
         for format in &mut self.formats {
@@ -399,15 +471,24 @@ pub(super) fn mask_alt_menu(request: &TextRequest)->bool {
     // cannot make that decision: our own partial down also sets the OS bit.
     complete_menu_pair(sent,&MENU_KEY_PENDING,physical_menu_key_released(),send_menu_up)
 }
-fn send_copy() -> bool {
-    // Ctrl+Insert is the standard Windows copy chord and never sends Ctrl+C
-    // (SIGINT) into a terminal that has no selection. No process-name allowlist.
-    let inputs = [key(0x11, false, false), key(0x2d, false, true),
-        key(0x2d, true, true), key(0x11, true, false)];
+fn copy_inputs(profile:CopyProfile)->Vec<Input> {
+    match profile {
+        CopyProfile::Standard=>vec![key(0x11,false,false),key(0x2d,false,true),key(0x2d,true,true),key(0x11,true,false)],
+        // Never try bare Ctrl+C: it can interrupt a terminal with no selection.
+        CopyProfile::Pebrel=>vec![key(0x11,false,false),key(0x10,false,false),key(0x43,false,false),
+            key(0x43,true,false),key(0x10,true,false),key(0x11,true,false)],
+    }
+}
+fn send_copy(profile:CopyProfile) -> bool {
+    let inputs=copy_inputs(profile);
     let sent = unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<Input>() as i32) };
     if sent != inputs.len() as u32 && sent > 0 {
-        // A partial insertion must not leave our synthetic Ctrl/Insert held.
-        let release = [key(0x2d, true, true), key(0x11, true, false)];
+        // Release only keys from this batch's inserted prefix. The release gate
+        // already established that no physical key was down before the batch.
+        let release:Vec<_>=if profile==CopyProfile::Standard {
+            vec![key(0x2d,true,true),key(0x11,true,false)]
+        }else{inputs[..sent.min(inputs.len() as u32) as usize].iter().rev()
+            .filter_map(|input|unsafe{let k=input.data.keyboard;(k.flags&2==0).then(||key(k.key,true,k.flags&1!=0))}).collect()};
         unsafe { SendInput(release.len() as u32, release.as_ptr(), std::mem::size_of::<Input>() as i32); }
     }
     sent == inputs.len() as u32
@@ -418,6 +499,7 @@ pub(super) struct CopyDiagnostics {
     sequence_changed: bool,
     busy_snapshots: usize,
     source_owner: Option<bool>,
+    ownerless_compatibility: bool,
     text_read: bool,
     read_outcome: Option<&'static str>,
     restore_completed: Option<bool>,
@@ -432,9 +514,9 @@ impl CopyDiagnostics {
 }
 pub(super) struct VerifiedCopy {pub selection:Option<Selection>,pub diagnostics:CopyDiagnostics}
 struct NativeBackend<'a, V, L, R, C> {
-    request: &'a TextRequest, valid: V, release: L, read: R, restore: C, started: Instant, before:u32, diagnostics:Cell<CopyDiagnostics>,
+    request: &'a TextRequest, valid: V, release: L, read: R, restore: C, started: Instant, before:u32, attempt:CopyAttempt, diagnostics:Cell<CopyDiagnostics>,
 }
-impl<V: Fn()->bool, L: Fn()->Option<u64>, R: FnMut(u32)->Option<CopiedText>, C: FnMut(Option<u32>)->Option<RestoreState>>
+impl<V: Fn()->bool, L: Fn()->Option<u64>, R: FnMut(u32,CopyAccess)->Option<CopiedText>, C: FnMut(Option<u32>,CopyAccess)->Option<RestoreState>>
     super::copy_policy::Backend for NativeBackend<'_,V,L,R,C> {
     fn valid(&self)->bool{
         let reason=if !(self.valid)() {Some(SourceRejection::InputOrRequestChanged)} else {source_rejection(self.request)};
@@ -451,30 +533,48 @@ impl<V: Fn()->bool, L: Fn()->Option<u64>, R: FnMut(u32)->Option<CopiedText>, C: 
         // clipboard. Do not read/materialize data or hold this lock across IPC,
         // SendInput, waits or restoration.
         let mut diagnostics=self.diagnostics.get();
+        // GPUI and the standard edit controls try OpenClipboard only once. Do
+        // not race that first open while nothing has changed: an unchanged
+        // locked snapshot proves nothing. This unlocked hint authorizes no data;
+        // receipt, reader and restore decisions still use a locked snapshot.
+        if !self.attempt.may_sample(self.before,unsafe{GetClipboardSequenceNumber()}) {
+            self.attempt.publication=None;return None;
+        }
         let Some(_lock)=ClipboardLock::open(0,Duration::ZERO) else {
             diagnostics.busy_snapshots=diagnostics.busy_snapshots.saturating_add(1);
+            self.attempt.publication=None;
             self.diagnostics.set(diagnostics);return None;
         };
         let sequence=unsafe{GetClipboardSequenceNumber()};let owns=source_owns(self.request);
+        let unowned=unsafe{GetClipboardOwner()}==0;
+        let current=unowned && self.attempt.profile==CopyProfile::Pebrel && self.attempt.complete && self.valid();
+        let settling=current && sequence!=self.before && !self.attempt.settled(sequence,self.started.elapsed());
+        if !current || sequence==self.before {self.attempt.publication=None;}
+        let compatible=!settling && self.attempt.observe(self.before,sequence,unowned,current);
+        diagnostics=self.diagnostics.get();
         diagnostics.sequence_changed|=sequence!=self.before;diagnostics.source_owner=Some(owns);
+        diagnostics.ownerless_compatibility|=compatible;
         self.diagnostics.set(diagnostics);
-        Some(super::copy_policy::ClipboardState{sequence,source_owns:owns})
+        if settling {return None;}
+        Some(super::copy_policy::ClipboardState{sequence,source_owns:owns||compatible})
     }
     fn send_copy(&mut self)->bool{
-        let sent=send_copy();let mut diagnostics=self.diagnostics.get();diagnostics.input_sent=Some(sent);self.diagnostics.set(diagnostics);sent
+        let sent=send_copy(self.attempt.profile);self.attempt.complete=sent;let mut diagnostics=self.diagnostics.get();diagnostics.input_sent=Some(sent);self.diagnostics.set(diagnostics);sent
     }
     fn read(&mut self,sequence:u32)->Option<CopiedText>{
-        let result=(self.read)(sequence);let mut diagnostics=self.diagnostics.get();diagnostics.text_read=true;
+        let result=(self.read)(sequence,self.attempt.access(Some(sequence)));
+        self.attempt.materialized(sequence,result.as_ref().and_then(|reply|reply.sequence));
+        let mut diagnostics=self.diagnostics.get();diagnostics.text_read=true;
         diagnostics.read_outcome=Some(super::diagnostics::code(result.as_ref().map(|reply|&reply.selection)));self.diagnostics.set(diagnostics);result
     }
     fn restore(&mut self,sequence:Option<u32>)->bool{
-        let state=(self.restore)(sequence);let mut diagnostics=self.diagnostics.get();
+        let state=(self.restore)(sequence,self.attempt.access(sequence));let mut diagnostics=self.diagnostics.get();
         diagnostics.restore_completed=state.map(|state|state==RestoreState::Restored);self.diagnostics.set(diagnostics);state.is_some()
     }
 }
 pub fn verify(request: &TextRequest, before: u32, valid: impl Fn()->bool, release: impl Fn()->Option<u64>,
-    read: impl FnMut(u32)->Option<CopiedText>, restore: impl FnMut(Option<u32>)->Option<RestoreState>) -> VerifiedCopy {
-    let mut backend=NativeBackend{request,valid,release,read,restore,started:Instant::now(),before,
+    read: impl FnMut(u32,CopyAccess)->Option<CopiedText>, restore: impl FnMut(Option<u32>,CopyAccess)->Option<RestoreState>) -> VerifiedCopy {
+    let mut backend=NativeBackend{request,valid,release,read,restore,started:Instant::now(),before,attempt:CopyAttempt::new(copy_profile(request)),
         diagnostics:Cell::new(CopyDiagnostics{request_valid:true,..Default::default()})};
     let selection=super::copy_policy::transact(&mut backend,before);
     VerifiedCopy{selection,diagnostics:backend.diagnostics.into_inner()}
@@ -514,10 +614,18 @@ impl ReadDiagnostics {
 }
 pub fn read_copied(request: &TextRequest, expected: u32, detail: &mut ReadDiagnostics) -> CopiedText { read_text(request,expected,false,detail) }
 pub fn read_observed(request: &TextRequest, expected: u32, detail: &mut ReadDiagnostics) -> CopiedText { read_text(request,expected,true,detail) }
+pub fn read_pebrel(request:&TextRequest,expected:u32,detail:&mut ReadDiagnostics)->CopiedText {
+    if copy_profile(request)!=CopyProfile::Pebrel {
+        detail.rejected_at=Some(ReadRejection::SourceBeforeRead);
+        return CopiedText{selection:Selection::SourceMismatch,sequence:None};
+    }
+    read_text(request,expected,true,detail)
+}
+
 fn read_text(request: &TextRequest, expected: u32, allow_unowned: bool, detail: &mut ReadDiagnostics) -> CopiedText {
     *detail=ReadDiagnostics::default();
-    // Only a caller's fresh, gesture-bound passive observation permits a null
-    // owner. Synthetic copy verification always requires the source's owner.
+    // Only a gesture-bound observation or the separately validated Pebrel copy
+    // adapter permits a null owner. Standard synthetic copies remain strict.
     let owns=||source_owns(request) || allow_unowned && unsafe {GetClipboardOwner()}==0;
     let failed = |selection| CopiedText { selection, sequence: None };
     if !detail.source_valid(source_rejection(request),ReadRejection::SourceBeforeRead) {return failed(Selection::SourceMismatch);}
@@ -586,6 +694,96 @@ mod tests {
     }
 
     use super::*;
+
+    #[test] fn pebrel_profile_requires_both_process_name_and_window_class() {
+        for (class,image,expected) in [
+            ("Zed::Window",r"D:\Apps\Pebrel\pebrel.exe",CopyProfile::Pebrel),
+            ("Zed::Window",r"D:\Apps\PEBREL.EXE",CopyProfile::Pebrel),
+            ("Zed::Window",r"D:\Apps\zed.exe",CopyProfile::Standard),
+            ("Zed::Window",r"D:\pebrel.exe\other.exe",CopyProfile::Standard),
+            ("Zed::Window",r"D:\not-pebrel.exe",CopyProfile::Standard),
+            ("OtherWindow",r"D:\Apps\pebrel.exe",CopyProfile::Standard),
+            ("","",CopyProfile::Standard),
+        ] {assert_eq!(profile_identity(class,image),expected);}
+    }
+    #[test] fn pebrel_chord_is_separate_and_all_synthetic_events_remain_tagged() {
+        for (profile,expected) in [
+            (CopyProfile::Standard,vec![(0x11,0),(0x2d,1),(0x2d,3),(0x11,2)]),
+            (CopyProfile::Pebrel,vec![(0x11,0),(0x10,0),(0x43,0),(0x43,2),(0x10,2),(0x11,2)]),
+        ] {
+            let inputs=copy_inputs(profile);
+            let actual:Vec<_>=inputs.iter().map(|input|unsafe {
+                let k=input.data.keyboard;assert_eq!(k.extra,INPUT_MARKER);(k.key,k.flags)
+            }).collect();
+            assert_eq!(actual,expected);
+        }
+    }
+    #[test] fn pebrel_ownerless_access_requires_complete_copy_fresh_sequence_and_valid_input() {
+        for profile in [CopyProfile::Standard,CopyProfile::Pebrel] {
+            for complete in [false,true] {for fresh in [false,true] {for current in [false,true] {for unowned in [false,true] {
+                let mut attempt=CopyAttempt::new(profile);attempt.complete=complete;
+                let sequence=if fresh {11}else{10};
+                let expected=profile==CopyProfile::Pebrel && complete && fresh && current && unowned;
+                assert_eq!(attempt.observe(10,sequence,unowned,current),expected);
+                assert_eq!(attempt.access(Some(sequence))==CopyAccess::Pebrel,expected);
+                assert_eq!(attempt.access(None),CopyAccess::SourceOwned);
+            }}}}
+        }
+    }
+    #[test] fn sent_copy_does_not_contend_for_the_source_first_clipboard_open() {
+        for profile in [CopyProfile::Standard,CopyProfile::Pebrel] {
+            let mut attempt=CopyAttempt::new(profile);
+            assert!(attempt.may_sample(10,10),"backup/release baseline still takes a locked snapshot");
+            attempt.complete=true;
+            assert!(!attempt.may_sample(10,10),"an unchanged sequence never needs the lock after the copy chord");
+            assert!(attempt.may_sample(10,11),"fresh hint still requires locked verification");
+            assert_eq!(attempt.access(Some(11)),CopyAccess::SourceOwned,"the hint grants no ownerless access");
+        }
+    }
+    #[test] fn pebrel_publication_waits_for_a_quiet_sequence_without_adopting_intermediate_formats() {
+        let mut attempt=CopyAttempt::new(CopyProfile::Pebrel);attempt.complete=true;
+        let mut receipt=Receipt::new(10);
+        for (sequence,time,ready) in [(11,0,false),(11,20,false),(12,25,false),(12,50,false),(12,65,true)] {
+            assert_eq!(attempt.settled(sequence,Duration::from_millis(time)),ready);
+            if ready {assert!(attempt.observe(10,sequence,true,true));assert_eq!(receipt.observe(sequence,true,true),Some(12));}
+        }
+        assert_eq!(attempt.access(Some(11)),CopyAccess::SourceOwned);
+        assert_eq!(attempt.access(Some(12)),CopyAccess::Pebrel);
+        // The reader's strict gate still rejects a later publication.
+        let mut detail=ReadDiagnostics::default();assert!(!detail.begin(13,12,true));
+        assert!(!receipt.restore_at(13,true));
+    }
+    #[test] fn pebrel_publication_busy_period_restarts_the_quiet_window() {
+        let mut attempt=CopyAttempt::new(CopyProfile::Pebrel);
+        assert!(!attempt.settled(11,Duration::ZERO));
+        attempt.publication=None; // the writer still has its clipboard lock
+        assert!(!attempt.settled(11,Duration::from_millis(50)));
+        assert!(!attempt.settled(11,Duration::from_millis(89)));
+        assert!(attempt.settled(11,Duration::from_millis(90)));
+    }
+    #[test] fn pebrel_ownerless_receipt_does_not_adopt_later_publications() {
+        let mut attempt=CopyAttempt::new(CopyProfile::Pebrel);attempt.complete=true;
+        assert!(attempt.observe(10,11,true,true));
+        assert!(!attempt.observe(10,12,true,true));
+        assert_eq!(attempt.access(Some(12)),CopyAccess::SourceOwned);
+        assert_eq!(attempt.access(Some(11)),CopyAccess::Pebrel);
+        // Only the locked reader's final materialization metadata can advance
+        // this proof; an unrelated read or failed/timeout reply cannot.
+        attempt.materialized(12,Some(13));assert_eq!(attempt.access(Some(13)),CopyAccess::SourceOwned);
+        attempt.materialized(11,None);assert_eq!(attempt.access(Some(11)),CopyAccess::Pebrel);
+        attempt.materialized(11,Some(14));
+        assert_eq!(attempt.access(Some(11)),CopyAccess::SourceOwned);
+        assert_eq!(attempt.access(Some(14)),CopyAccess::Pebrel);
+    }
+    #[test] fn pebrel_private_reader_refuses_an_unverified_source_before_clipboard_access() {
+        let request=TextRequest{pid:0,window:0,focus:0,origin:super::super::windows_text::TextOrigin::PebrelClipboard(1)};
+        let mut detail=ReadDiagnostics::default();
+        let copied=read_pebrel(&request,1,&mut detail);
+        assert_eq!(copied.selection,Selection::SourceMismatch);assert_eq!(copied.sequence,None);
+        assert!(!detail.materialization_started);
+        assert_eq!(detail.rejected_at,Some(ReadRejection::SourceBeforeRead));
+    }
+
     #[test] fn copied_reader_rejects_a_new_copy_even_when_the_same_source_still_owns_it() {
         for owner in [false,true] {
             let mut detail=ReadDiagnostics::default();
@@ -621,7 +819,7 @@ mod tests {
         for (state,accepted,completed) in [(Some(RestoreState::Restored),true,Some(true)),
             (Some(RestoreState::Skipped),true,Some(false)),(None,false,None)] {
             let mut backend=NativeBackend{request:&request,valid:||true,release:||None,
-                read:|_|None,restore:|_|state,started:Instant::now(),before:1,
+                read:|_,_|None,restore:|_,_|state,started:Instant::now(),before:1,attempt:CopyAttempt::new(CopyProfile::Standard),
                 diagnostics:Cell::new(CopyDiagnostics::default())};
             assert_eq!(backend.restore(Some(2)),accepted);
             assert_eq!(backend.diagnostics.get().restore_completed,completed);
