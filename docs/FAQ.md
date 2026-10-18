@@ -1,12 +1,12 @@
 # 常见问题
 
-[下载 WordSide · 词伴](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.3) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
+[下载 WordSide · 词伴](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.4) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
 
 ## 安装与运行
 
 **第一次使用应该下载哪个文件？**
 
-推荐 `WordSide_0.1.3_x64-setup.exe`，按提示安装即可。希望解压使用时，选择 `WordSide_0.1.3-portable.zip`，解压全部文件后运行其中的程序。
+推荐 `WordSide_0.1.4_x64-setup.exe`，按提示安装即可。希望解压使用时，选择 `WordSide_0.1.4-portable.zip`，解压全部文件后运行其中的程序。
 
 **为什么默认安装在 AppData\Local，而不是 Program Files？**
 
@@ -69,7 +69,7 @@ WordSide 直接访问 [Cambridge Dictionary](https://dictionary.cambridge.org/)�
 ```powershell
 $env:HTTPS_PROXY = 'http://127.0.0.1:7890'
 $env:HTTP_PROXY = 'http://127.0.0.1:7890'
-& '.\WordSide_0.1.3.exe'
+& '.\WordSide_0.1.4.exe'
 ```
 
 先在托盘右键退出 WordSide，再进入 EXE 所在目录执行这些命令。它们只影响这个 PowerShell 窗口及从中启动的程序。

@@ -3,9 +3,9 @@
 </p>
 <h1 align="center">WordSide · 词伴</h1>
 <p align="center">选中一个词，读懂它。<br>一个安静、紧凑的 Windows 划词词典。</p>
-<p align="center"><strong>0.1.3 · Windows x64 · Cambridge Dictionary</strong></p>
+<p align="center"><strong>0.1.4 · Windows x64 · Cambridge Dictionary</strong></p>
 <p align="center">
-  <a href="https://github.com/caoshuo2003/wordside/releases/tag/v0.1.3">下载 WordSide</a> ·
+  <a href="https://github.com/caoshuo2003/wordside/releases/tag/v0.1.4">下载 WordSide</a> ·
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
   <a href="docs/FAQ.md">常见问题</a> ·
   <a href="docs/PRIVACY.md">隐私与数据</a>
@@ -17,16 +17,16 @@
 
 *界面预览，使用示例词条。[图片说明](docs/SCREENSHOTS.md)*
 
-**0.1.3 更新**：改善网页连续取词与 PowerShell 7 快捷键取词，修复 `minutes` 释义不可用的问题。[查看本版变化](docs/releases/v0.1.3.md)
+**0.1.4 更新**：修复刚启动或长时间闲置后取词无反应、Chrome 网页误提示“请重新选词”，改善 Pebrel 取词；浮窗与主窗口外观更新。[查看本版变化](docs/releases/v0.1.4.md)
 
 ## 下载与开始
 
-从 [0.1.3 发布页](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.3) 下载，选择一种方式即可：
+从 [0.1.4 发布页](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.4) 下载，选择一种方式即可：
 
 | 方式 | 下载 | 使用方式 |
 |---|---|---|
-| 安装版 · 推荐 | [Windows x64 安装包](https://github.com/caoshuo2003/wordside/releases/download/v0.1.3/WordSide_0.1.3_x64-setup.exe) | 按提示安装，然后打开 WordSide |
-| 便携版 | [ZIP 压缩包](https://github.com/caoshuo2003/wordside/releases/download/v0.1.3/WordSide_0.1.3-portable.zip) | 解压全部文件，运行其中的 WordSide |
+| 安装版 · 推荐 | [Windows x64 安装包](https://github.com/caoshuo2003/wordside/releases/download/v0.1.4/WordSide_0.1.4_x64-setup.exe) | 按提示安装，然后打开 WordSide |
+| 便携版 | [ZIP 压缩包](https://github.com/caoshuo2003/wordside/releases/download/v0.1.4/WordSide_0.1.4-portable.zip) | 解压全部文件，运行其中的 WordSide |
 
 需要 **Windows x64**、**Microsoft Edge WebView2** 和能访问 Cambridge 的网络。查词功能已内置，安装后即可开始。
 
@@ -34,7 +34,7 @@
 2. 想选中就查，打开“自动划词”；想自己触发，选中单词后按 **Ctrl+Alt+A**。快捷键可以在设置里修改。
 3. 把浮窗拖到顺手的位置，调整大小，再选一套喜欢的配色。
 
-[完整使用指南](docs/USER-GUIDE.md) · [安装问题](docs/FAQ.md#安装与运行) · [取词与已知限制](docs/FAQ.md#取词与快捷键) · [隐私与数据](docs/PRIVACY.md) · [本版说明](docs/releases/v0.1.3.md)
+[完整使用指南](docs/USER-GUIDE.md) · [安装问题](docs/FAQ.md#安装与运行) · [取词与已知限制](docs/FAQ.md#取词与快捷键) · [隐私与数据](docs/PRIVACY.md) · [本版说明](docs/releases/v0.1.4.md)
 
 ## 查词时，你可以
 
