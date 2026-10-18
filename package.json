@@ -7,7 +7,7 @@
     "build": "node tools/build-ui.mjs",
     "check": "node tools/build-ui.mjs --check",
     "test:dictionary": "node --test modules/cambridge-dictionary-api/tests/*.test.js",
-    "test": "node --test modules/cambridge-dictionary-api/tests/dictionary.test.js modules/cambridge-dictionary-api/tests/http.test.js modules/cambridge-dictionary-api/tests/suggestions.test.js shared/tests/dictionary.test.cjs desktop/tests/presentation.test.cjs",
+    "test": "node --test modules/cambridge-dictionary-api/tests/dictionary.test.js modules/cambridge-dictionary-api/tests/http.test.js modules/cambridge-dictionary-api/tests/suggestions.test.js shared/tests/dictionary.test.cjs desktop/tests/presentation.test.cjs desktop/tests/native-startup.test.cjs",
     "build:licenses": "node tools/build-licenses.mjs"
   },
   "workspaces": [

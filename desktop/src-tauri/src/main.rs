@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod selection_input;
 mod popup_geometry;
+mod window_frame;
 mod window_lifecycle;
 mod capture;
 mod dismissal;
@@ -138,6 +139,12 @@ fn popup_ready(window: tauri::WebviewWindow,state: tauri::State<State>) { if win
 #[tauri::command]
 fn set_pinned(state: tauri::State<State>, pinned: bool) {state.pinned.store(pinned,Ordering::SeqCst);}
 #[tauri::command]
+fn set_window_frame(window: tauri::WebviewWindow, border: String, caption: Option<String>, text: Option<String>, dark: bool) -> bool {
+    let Some(frame)=window_frame::Frame::parse(&border,caption.as_deref(),text.as_deref(),dark) else{return false;};
+    #[cfg(windows)]{window.hwnd().is_ok_and(|hwnd|frame.apply(hwnd.0 as isize))}
+    #[cfg(not(windows))]{let _=(window,frame);false}
+}
+#[tauri::command]
 fn hide_popup(app: tauri::AppHandle) {
     let state=app.state::<State>();state.capture_epoch.fetch_add(1,Ordering::SeqCst);state.popup_epoch.fetch_add(1,Ordering::SeqCst);state.pinned.store(false,Ordering::SeqCst);
     let handle=app.clone();let _=app.run_on_main_thread(move||{
@@ -191,13 +198,18 @@ fn main(){
     #[cfg(windows)]if capture::probe::helper_entry(){return;}
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app,_,_|show_main(app)))
-        .invoke_handler(tauri::generate_handler![get_settings,set_enabled,save_appearance,save_close_behavior,save_lookup_hotkey,cancel_lookup,popup_ready,set_pinned,hide_popup,open_source,lookup,settle_lookup])
+        .invoke_handler(tauri::generate_handler![get_settings,set_enabled,save_appearance,save_close_behavior,save_lookup_hotkey,cancel_lookup,popup_ready,set_pinned,set_window_frame,hide_popup,open_source,lookup,settle_lookup])
         .setup(|app|{
             let config=app.path().app_config_dir()?.join("settings.json");
             let mut settings=fs::read(&config).ok().map(|bytes|decode_settings(&bytes)).unwrap_or_default();
             if !cfg!(windows){settings.enabled=false;}
             let enabled=settings.enabled;
             app.manage(State{#[cfg(windows)]hotkeys:Arc::new(capture::hotkey::Control::default()),settings:Mutex::new(settings),settings_revision:AtomicU64::new(0),config,popup_geometry:Mutex::new(popup_geometry::GeometryState::default()),hotkey_save:Mutex::new(()),enabled:AtomicBool::new(enabled),pinned:AtomicBool::new(false),ready:AtomicBool::new(false),lookup_serial:AtomicU64::new(0),main_epoch:AtomicU64::new(0),popup_epoch:AtomicU64::new(0),capture_epoch:AtomicU64::new(0),capture_serial:AtomicU64::new(0),cache:Mutex::new(cache::Cache::default()),gates:Mutex::new(HashMap::new()),dictionary:dictionary::Backend::default()});
+            // A new WebView may invoke commands while Windows pumps messages
+            // during construction. Manage State before creating either view.
+            for config in app.config().app.windows.clone() {
+                tauri::WebviewWindowBuilder::from_config(app,&config)?.build()?;
+            }
             let toggle=CheckMenuItem::with_id(app,"toggle","自动划词",true,enabled,None::<&str>)?;
             let show=MenuItem::with_id(app,"show","打开 WordSide",true,None::<&str>)?;
             let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;
@@ -215,6 +227,11 @@ fn main(){
             app.listen("native-state",move |_|{let _=check.set_checked(handle.state::<State>().enabled.load(Ordering::SeqCst));});
             capture::start(app.handle().clone());
             Ok(())
+        })
+        .on_page_load(|webview,payload|{
+            if webview.label()=="popup" && matches!(payload.event(),tauri::webview::PageLoadEvent::Started) {
+                if let Some(state)=webview.try_state::<State>() {state.ready.store(false,Ordering::SeqCst);}
+            }
         })
         .on_window_event(|window,event|{
             if window.label()=="popup" {match event {

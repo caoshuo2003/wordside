@@ -1,6 +1,18 @@
 if(nativeAPI){
   document.body.classList.add(isPopup?'native-popup':'native-main');
   if(!isPopup)get('native-capture-toggle').append(enabled.closest('label')!);
+  // Windows 11 draws the caption, border and corners; tint them with the current palette.
+  let frameKey='';
+  const syncFrame=(force=false)=>{
+    const style=getComputedStyle(document.body),token=(name:string)=>style.getPropertyValue(name).trim(),dark=document.body.classList.contains('dark');
+    const frame=isPopup?{border:token('--card-line'),caption:token('--card'),text:null,dark}:{border:token('--line'),caption:token('--bg'),text:token('--text'),dark};
+    const key=JSON.stringify(frame);if(!frame.border||(!force&&key===frameKey))return;frameKey=key;
+    void nativeAPI!.core.invoke<boolean>('set_window_frame',frame).then(drawn=>document.body.classList.toggle('system-frame',drawn)).catch(()=>{});
+  };
+  new MutationObserver(()=>syncFrame()).observe(document.body,{attributes:true,attributeFilter:['class','data-palette']});
+  // The window layer re-applies the system theme to the caption buttons when it changes.
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>syncFrame(true));
+  syncFrame();
   const note=get('native-status');
   const hotkeyInput=get<HTMLInputElement>('lookup-hotkey');
   const hotkeyStatus=get('shortcut-status');const hotkeyBadge=get('shortcut-badge');const record=get<HTMLButtonElement>('record-hotkey');
@@ -100,21 +112,45 @@ if(nativeAPI){
     const anchor=(event.target as Element).closest<HTMLAnchorElement>('a[href]');
     if(anchor?.href.startsWith('https://dictionary.cambridge.org/')){event.preventDefault();void nativeAPI!.core.invoke('open_source',{url:anchor.href}).catch(()=>{if(isPopup)get('source-link').textContent='链接暂不可用';else note.textContent='暂时无法打开原词典。';});}
   });
-  void (async()=>{
-    await nativeAPI!.event.listen<NativeInfo>('native-state',event=>applyNative(event.payload));
-    await nativeAPI!.event.listen('native-hidden',()=>{captureActive=false;closeCard(true);});
-    await nativeAPI!.event.listen<{serial:number;manual:boolean}>('native-capture-started',event=>{
+  let startupClosed=false,retryDelay=250;
+  let startupRetry:ReturnType<typeof setTimeout>|undefined;
+  let disconnectStartup=()=>{};
+  window.addEventListener('beforeunload',()=>{startupClosed=true;clearTimeout(startupRetry);disconnectStartup();});
+  async function initializeNative(){
+    startupRetry=undefined;
+    let cancelled=false;
+    const subscriptions:Array<()=>void>=[];
+    disconnectStartup=()=>{cancelled=true;for(const unlisten of subscriptions.splice(0)){try{unlisten();}catch{}}};
+    async function listen<T>(name:string,callback:(event:{payload:T})=>void){
+      const unlisten=await nativeAPI!.event.listen<T>(name,event=>{if(!cancelled&&!startupClosed)callback(event);});
+      if(cancelled||startupClosed){unlisten();throw new Error('Window closed');}
+      subscriptions.push(unlisten);
+    }
+    try{
+    await listen<NativeInfo>('native-state',event=>applyNative(event.payload));
+    await listen('native-hidden',()=>{captureActive=false;closeCard(true);});
+    await listen<{serial:number;manual:boolean}>('native-capture-started',event=>{
       if(!isPopup||(!event.payload.manual&&!enabled.checked)||event.payload.serial<=captureSerial)return;captureSerial=event.payload.serial;captureActive=true;manualLookup=event.payload.manual;prepareCapture();
     });
-    await nativeAPI!.event.listen<{word:string;serial?:number;manual?:boolean}>('native-selection',event=>{
+    await listen<{word:string;serial?:number;manual?:boolean}>('native-selection',event=>{
       if(!isPopup||(!event.payload.manual&&!enabled.checked)||!acceptsCapture(event.payload))return;
       if(event.payload.serial!==undefined)captureSerial=event.payload.serial;captureActive=true;manualLookup=Boolean(event.payload.manual);void lookup(event.payload.word,0,0);
     });
-    await nativeAPI!.event.listen<CaptureFailure>('native-selection-failed',event=>{
+    await listen<CaptureFailure>('native-selection-failed',event=>{
       if(!isPopup||!acceptsCapture(event.payload))return;if(event.payload.serial!==undefined)captureSerial=event.payload.serial;captureActive=true;showCaptureFailure(event.payload);
     });
-    await nativeAPI!.event.listen<{code?:string}>('native-capture-feedback',event=>{note.textContent=event.payload.code==='select_first'?'先在其他应用选中单词，再按快捷键。':event.payload.code==='popup_size_save_failed'?'窗口大小未保存，请稍后重试。':'自动取词暂不可用，手动查词仍可使用。';});
-    applyNative(await nativeAPI!.core.invoke<NativeInfo>('get_settings'));
+    await listen<{code?:string}>('native-capture-feedback',event=>{note.textContent=event.payload.code==='select_first'?'先在其他应用选中单词，再按快捷键。':event.payload.code==='popup_size_save_failed'?'窗口大小未保存，请稍后重试。':'自动取词暂不可用，手动查词仍可使用。';});
+    const initial=await nativeAPI!.core.invoke<NativeInfo>('get_settings');
+    if(cancelled||startupClosed)return;
+    applyNative(initial);
     if(isPopup)await nativeAPI!.core.invoke('popup_ready');
-  })().catch(()=>{note.textContent='WordSide 暂未就绪，请重新打开。';});
+    }catch{
+      disconnectStartup();
+      if(startupClosed)return;
+      note.textContent='正在准备取词，请稍候…';
+      startupRetry=setTimeout(()=>void initializeNative(),retryDelay);
+      retryDelay=Math.min(retryDelay*2,5000);
+    }
+  }
+  void initializeNative();
 }

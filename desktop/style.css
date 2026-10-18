@@ -37,17 +37,12 @@ details{margin-top:12px;font-size:12px}summary{cursor:pointer;color:var(--accent
 @media(max-width:600px){main{padding:24px 18px}.intro{padding-top:34px}.terminal{padding:18px}.bar,.hint{padding:13px;flex-wrap:wrap}.card-head{padding:16px 18px 10px}.definitions{padding:12px 18px 20px}.card-footer{padding:12px 18px}.phonetic{gap:8px;font-size:10px}.brand{font-size:20px}.theme-label{gap:4px}.theme-label select{padding:7px}#lookup-form{flex-wrap:wrap}#query{max-width:100%}}
 
 .native-settings,.app-status{display:none}
-.native-main main{max-width:440px;padding:20px 20px 16px}
-.native-main .brand{font-size:23px}
-.native-main .native-settings{display:block;margin:20px 0 0}
 .native-main .intro,.native-main .terminal,.native-main main>footer,.native-main .workspace{display:none}
-.native-main .native-settings h1{font-size:22px}
-.settings-description{margin:10px 0 0;color:var(--muted);font-size:12px;line-height:1.7}
-.native-main #lookup-form{margin-top:18px}
-.native-main .app-status{display:block;margin:12px 0 0;color:var(--muted);font-size:11px;line-height:1.7;overflow-wrap:anywhere}
 .native-popup main{display:none}
 .native-popup{margin:0;overflow:hidden;background:var(--card)}
-.native-popup .card{inset:0!important;width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:12px;box-shadow:none}
+.native-popup .card{inset:0!important;width:100vw;max-width:100vw;height:100vh;max-height:100vh;border-radius:0;box-shadow:none}
+/* Windows 11 rounds the popup and draws its border in the card palette (native.ts). */
+.native-popup.system-frame .card{border-color:transparent}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 
 .suggestion-label { color:var(--card-muted); font-size:12px; margin:20px 0 0; }
@@ -57,24 +52,7 @@ details{margin-top:12px;font-size:12px}summary{cursor:pointer;color:var(--accent
 .correction { display:flex; gap:8px; margin:16px 0; flex-wrap:wrap; }
 .correction input { flex:1; min-width:140px; border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:transparent; color:inherit; font:inherit; }
 
-
-.settings-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.settings-heading h1{flex:1;margin:0!important;min-width:0}#native-capture-toggle label{padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--soft);font-size:13px;white-space:nowrap}.native-main .workspace{display:none}
-
-.shortcut-settings{padding:16px;margin:16px 0 0;border:1px solid var(--line);border-radius:14px;background:linear-gradient(125deg,var(--panel),var(--soft));font-size:13px}
-.shortcut-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
-.shortcut-heading h2{font-family:inherit;letter-spacing:0;font-size:17px;font-weight:600;margin:0}
-.shortcut-badge{border:1px solid var(--line);border-radius:999px;padding:5px 10px;color:var(--muted);font-size:11px;white-space:nowrap}
-.shortcut-badge[data-state=active]{color:var(--accent);background:var(--soft)}
-.shortcut-badge[data-state=error],.shortcut-status[data-state=error]{color:var(--warning)}
-.shortcut-row{display:flex;gap:8px;align-items:center}
-#lookup-hotkey{min-width:0;flex:1;background:var(--card);border:1px solid var(--line);border-radius:9px;padding:11px 13px;color:var(--text);font:600 14px "Cascadia Code",Consolas,monospace}
-.shortcut-row button{white-space:nowrap}
-#save-hotkey{background:var(--accent);color:var(--bg);border-color:var(--accent)}
-#record-hotkey[aria-pressed=true]{background:var(--soft);outline:1px solid var(--accent)}
-.shortcut-note{margin:10px 0 0;color:var(--muted);font-size:12px;line-height:1.7}
-.shortcut-status{margin:10px 0 0;line-height:1.7;color:var(--accent);overflow-wrap:anywhere}
 .card.capture-error h2{font-family:inherit;font-size:25px;letter-spacing:0}.capture-failure{padding:22px 0}.capture-failure h3{color:var(--ink);font-size:16px;font-weight:600;margin:0 0 12px}.capture-failure p{font-size:13px;color:var(--card-muted);line-height:1.9}.capture-failure .correction{margin-top:26px}.capture-failure .correction input{width:100%}[hidden]{display:none!important}
-@media(max-width:600px){.native-main main{padding:20px 18px 16px}.shortcut-settings{padding:14px}.shortcut-row{flex-wrap:wrap}#lookup-hotkey{flex-basis:100%}.shortcut-row button{flex:1}.shortcut-heading{gap:10px}.shortcut-heading .eyebrow{font-size:9px}}
 
 .example-labels { display: block; margin: 5px 0; }
 
@@ -91,12 +69,8 @@ body.dark{--english-ink:#e4c898;--english-soft:#332d24;--english-line:#625139}
 .translation-note{display:inline-block;font-size:10px;font-weight:600;line-height:1.5;color:var(--english-ink);background:var(--english-soft);border-radius:5px;padding:3px 7px;margin-bottom:7px}
 .sense.without-translation .definition-text{color:var(--ink);font-size:14px}
 
-
 /* Compact settings; content wraps instead of stretching the window. */
-.native-main #lookup-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.native-main #lookup-form>label{grid-column:1 / -1;font-size:12px;color:var(--muted)}
 .native-popup .entry-toolbar{flex-wrap:wrap;gap:6px}.native-popup .card-head{padding:16px 18px 10px}.native-popup .definitions{padding:12px 18px 20px}.native-popup .card-footer{padding:12px 18px}.native-popup .phonetic{--pron-gap:8px;gap:6px 8px}
-
-.native-main .shortcut-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px}.native-main #lookup-hotkey{padding:10px;min-width:0}.native-main .shortcut-row button{padding:9px 10px}.native-main .shortcut-settings{padding:14px}.native-main .shortcut-heading{margin-bottom:10px}.native-main .shortcut-note{font-size:11px}
 
 /* A small drag area and eight native resize edges keep the content selectable. */
 .popup-drag-area{flex:1;min-height:24px;align-items:center}.native-popup .popup-drag-area{cursor:grab;user-select:none;touch-action:none}.native-popup .popup-drag-area:active{cursor:grabbing}
@@ -104,7 +78,7 @@ body.dark{--english-ink:#e4c898;--english-soft:#332d24;--english-line:#625139}
 .resize-n,.resize-s{left:12px;right:12px;height:5px;cursor:ns-resize}.resize-n{top:0}.resize-s{bottom:0}
 .resize-e,.resize-w{top:12px;bottom:12px;width:5px;cursor:ew-resize}.resize-e{right:0}.resize-w{left:0}
 .resize-ne,.resize-se,.resize-sw,.resize-nw{width:12px;height:12px}.resize-ne{top:0;right:0;cursor:nesw-resize}.resize-se{bottom:0;right:0;cursor:nwse-resize}.resize-sw{bottom:0;left:0;cursor:nesw-resize}.resize-nw{top:0;left:0;cursor:nwse-resize}
-.resize-se:after{content:"";position:absolute;right:3px;bottom:3px;width:7px;height:7px;border-right:3px double var(--card-muted);border-bottom:3px double var(--card-muted);opacity:.55}
+.resize-se:after{content:"";position:absolute;right:5px;bottom:5px;width:7px;height:7px;border-right:3px double var(--card-muted);border-bottom:3px double var(--card-muted);opacity:.55}
 
 /* Short popups retain a useful definitions area; every pronunciation remains scrollable. */
 @media(max-height:480px){.native-popup .phonetic{max-height:64px}.native-popup .word{margin:8px 0 4px}.native-popup .word h2{font-size:30px;max-height:74px;overflow:auto}.native-popup .word-pos{margin:3px 0 6px}.native-popup .entry-toolbar{margin-bottom:8px}.native-popup .card-head{padding-top:12px}.native-popup .card-footer{padding:10px 18px}}
@@ -117,11 +91,60 @@ body.dark{--english-ink:#e4c898;--english-soft:#332d24;--english-line:#625139}
 .is-loading .lookup-state-icon{border-width:2px;border-top-color:var(--accent);background:transparent;animation:lookup-spin 1s linear infinite;width:28px;height:28px;margin:6px}
 .lookup-actions{display:flex;justify-content:center;margin:16px 0}.card .lookup-actions button{padding:7px 22px}
 .card[data-translation-state=english] .sense.without-translation{border-left:0;padding-left:0}
-.close-settings{display:none}.native-main .close-settings{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:6px 12px;margin-top:14px;font-size:12px}
-.close-settings select{min-width:0;max-width:180px;padding:7px 9px;font-size:12px}.close-settings p{grid-column:1/-1;font-size:11px;color:var(--muted);margin:0;line-height:1.6}.close-settings #close-status{color:var(--warning)}
-.native-main main{padding-top:18px;padding-bottom:12px}.native-main .appearance-controls{margin-top:16px;gap:10px}.native-main .native-settings{margin-top:16px}
-.native-main .shortcut-settings{margin-top:12px;padding:12px}.native-main .shortcut-heading{margin-bottom:8px}.native-main .shortcut-note{margin-top:8px}
-.native-main .shortcut-row button{padding:8px}.native-main #lookup-hotkey{padding:9px}.native-main #lookup-form{margin-top:14px}.native-main .app-status{margin-top:10px}select:disabled{opacity:.65;cursor:default}
+.close-settings{display:none}
+select:disabled{opacity:.65;cursor:default}
 @keyframes lookup-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.is-loading .lookup-state-icon{animation:none}}
 @media(max-height:480px){.native-popup .lookup-state{padding-top:12px;gap:8px}.native-popup .lookup-state-icon{width:30px;height:30px;font-size:21px}}
+
+/* Settings window: grouped panels on a flat background; the caption shares --bg (native.ts). */
+html:has(>.native-main){overflow:hidden}
+.native-main{height:100vh;overflow-y:auto;background:var(--bg);scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.native-main main{display:flex;flex-direction:column;gap:14px;max-width:560px;padding:10px 20px 14px}
+.native-main header{order:0}.native-main #lookup-form{order:1}.native-main .native-settings{order:2}.native-main .appearance-controls{order:3}.native-main .close-settings{order:4}.native-main .app-status{order:5}
+.native-main .brand{gap:10px;font-size:17px}.native-main .brand-icon{width:26px;height:26px}
+.native-main main button,.native-main main select{height:34px;padding:0 12px;border-radius:8px;font-size:12px;background:var(--panel)}
+.native-main main button:hover{background:var(--soft)}.native-main main button:disabled{opacity:.6;cursor:default}
+.native-main .native-settings,.native-main .appearance-controls,.native-main .close-settings{background:var(--panel);border:1px solid var(--line)}
+
+/* Manual lookup reads as the window's search field. */
+.native-main #lookup-form{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin:0}
+.native-main #lookup-form>label{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.native-main #lookup-form:before{content:"";position:absolute;left:13px;top:12px;width:16px;height:16px;background:var(--muted);pointer-events:none;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='4.6'/%3E%3Cpath d='m10.5 10.5 3.2 3.2'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='4.6'/%3E%3Cpath d='m10.5 10.5 3.2 3.2'/%3E%3C/svg%3E") center/contain no-repeat}
+.native-main #query{max-width:none;height:40px;padding:0 13px 0 38px;border-radius:10px;font-size:13px}
+.native-main #query::placeholder{color:var(--muted);opacity:.8}
+.native-main #lookup-form button,#save-hotkey{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
+.native-main #lookup-form button{height:40px;padding:0 18px;border-radius:10px}
+.native-main #lookup-form button:hover,.native-main #save-hotkey:hover{filter:brightness(1.08);background:var(--accent)}
+
+/* Capture panel: switch row, then the shortcut row. */
+.native-main .native-settings{display:block;margin:0;border-radius:12px;overflow:hidden}
+.settings-heading{display:flex;align-items:center;gap:12px;padding:13px 16px 0}
+.native-main .settings-heading h1{flex:1;min-width:0;margin:0;font-size:14px;font-weight:600;line-height:1.5;letter-spacing:0;color:var(--text)}
+.settings-description{margin:2px 16px 0;padding-bottom:13px;color:var(--muted);font-size:12px;line-height:1.6}
+#native-capture-toggle label{flex-direction:row-reverse;gap:10px;font-size:12px;color:var(--muted);white-space:nowrap}
+.native-main #enabled{appearance:none;position:relative;flex-shrink:0;width:38px;height:22px;margin:0;border-radius:999px;background:color-mix(in srgb,var(--muted) 38%,var(--line));transition:background .15s;cursor:pointer}
+.native-main #enabled:before{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--panel);box-shadow:0 1px 2px #0003;transition:transform .15s}
+.native-main #enabled:checked{background:var(--accent)}.native-main #enabled:checked:before{transform:translateX(16px)}
+.shortcut-settings{padding:13px 16px 14px;border-top:1px solid var(--line);font-size:13px}
+.shortcut-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+.shortcut-heading h2{margin:0;font-family:inherit;font-size:13px;font-weight:600;line-height:1.5;letter-spacing:0}
+.shortcut-badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;background:var(--soft);color:var(--muted);font-size:11px;line-height:1.6;white-space:nowrap}
+.shortcut-badge:before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.75}
+.shortcut-badge[data-state=active]{color:var(--accent)}
+.shortcut-badge[data-state=error],.shortcut-status[data-state=error]{color:var(--warning)}
+.shortcut-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:6px}
+#lookup-hotkey{min-width:0;height:34px;padding:0 11px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--text);font:600 13px "Cascadia Code",Consolas,monospace}
+.shortcut-row button{white-space:nowrap}
+#record-hotkey[aria-pressed=true]{background:var(--soft);border-color:var(--accent);color:var(--accent)}
+.shortcut-note,.shortcut-status{margin:8px 0 0;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
+.shortcut-note{color:var(--muted)}.shortcut-status{color:var(--accent)}
+
+/* General panel: appearance and close behavior share one card. */
+.native-main .appearance-controls{display:block;margin:0;border-bottom:0;border-radius:12px 12px 0 0}
+.native-main .appearance-controls label,.native-main .close-settings{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,148px);align-items:center;gap:4px 12px;padding:9px 12px 9px 16px;font-size:13px;color:var(--text)}
+.native-main .appearance-controls label+label{border-top:1px solid var(--line)}
+.native-main .appearance-controls select,.native-main .close-settings select{width:100%;min-width:0;padding:0 8px}
+.native-main .close-settings{margin-top:-14px;border-radius:0 0 12px 12px}
+.close-settings p{grid-column:1/-1;margin:0;font-size:11px;line-height:1.6;color:var(--warning)}
+.native-main .app-status{display:block;margin:0;color:var(--muted);font-size:11px;line-height:1.6;text-align:center;overflow-wrap:anywhere}

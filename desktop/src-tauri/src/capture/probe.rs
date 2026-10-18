@@ -150,19 +150,25 @@ impl Worker{
      outcome=if let Some(before)=prepared.as_ref().and_then(|reply|reply.clipboard_sequence){
       report.phase=super::diagnostics::Phase::Copy;
       let read_detail=std::cell::Cell::new(None);
-      let verified=super::windows_copy::verify(&request.text,before,valid,||work_item.release.as_ref().and_then(super::timing::Activity::stamp),|sequence|{
+      let verified=super::windows_copy::verify(&request.text,before,valid,||work_item.release.as_ref().and_then(super::timing::Activity::stamp),|sequence,access|{
        if helper.is_none(){helper=Helper::spawn(&program,&args).ok();}
        let Some(reader)=helper.as_mut() else{return Some(super::copy_policy::CopiedText{selection:Selection::CopyUnavailable,sequence:None});};
-       let mut copy_request=request.clone();copy_request.text.origin=super::windows_text::TextOrigin::Clipboard(sequence);
+       let mut copy_request=request.clone();copy_request.text.origin=match access {
+        super::windows_copy::CopyAccess::SourceOwned=>super::windows_text::TextOrigin::Clipboard(sequence),
+        super::windows_copy::CopyAccess::Pebrel=>super::windows_text::TextOrigin::PebrelClipboard(sequence),
+       };
        // Once copying has started, cancellation suppresses publication but
        // must not discard materialization metadata needed for restoration.
        let cleanup_serial=AtomicU64::new(request.serial);
        let result=reader.exchange(&copy_request,&cleanup_serial,Duration::from_millis(350));
        if result.as_ref().is_none_or(|reply|matches!(reply.selection,Selection::Timeout|Selection::ReadError(_))){helper=None;}
        result.map(|reply|{read_detail.set(reply.clipboard_read);super::copy_policy::CopiedText{selection:reply.selection,sequence:reply.clipboard_sequence}})
-      },|sequence|{
+      },|sequence,access|{
        let Some(backup)=backup_helper.as_mut() else{return None;};
-       let mut restore_request=request.clone();restore_request.text.origin=super::windows_text::TextOrigin::Restore(sequence);
+       let mut restore_request=request.clone();restore_request.text.origin=match access {
+        super::windows_copy::CopyAccess::SourceOwned=>super::windows_text::TextOrigin::Restore(sequence),
+        super::windows_copy::CopyAccess::Pebrel=>super::windows_text::TextOrigin::PebrelRestore(sequence),
+       };
        // Restoration must run even after the original serial was cancelled.
        let cleanup_serial=AtomicU64::new(request.serial);
        let result=backup.exchange(&restore_request,&cleanup_serial,Duration::from_millis(800));
@@ -226,14 +232,18 @@ fn serve(mut read:impl FnMut(&IUIAutomation,&TextRequest,&mut ProviderDiagnostic
      let clipboard_failure=match super::windows_copy::Backup::take(){Ok(value)=>{backup=Some(value);None},Err(error)=>{backup=None;Some(error)}};
      ProbeResult{serial:request.serial,retryable:false,native_verified:false,provider_detail:None,clipboard_read:None,selection:if backup.is_some(){Selection::NoSelection}else{Selection::ClipboardUnavailable},clipboard_sequence:backup.as_ref().map(|value|value.before),clipboard_failure,clipboard_ole_formats:backup.as_ref().map(|value|value.ole_formats),clipboard_restore:None}
     },
-    super::windows_text::TextOrigin::Restore(sequence)=>{
-     let state=backup.take().and_then(|mut value|value.restore(sequence,&request.text).ok());
+    super::windows_text::TextOrigin::Restore(sequence)|super::windows_text::TextOrigin::PebrelRestore(sequence)=>{
+     let state=backup.take().and_then(|mut value|if matches!(request.text.origin,super::windows_text::TextOrigin::PebrelRestore(_)) {
+      value.restore_scoped(sequence,&request.text,super::windows_copy::CopyAccess::Pebrel).ok()
+     }else{value.restore(sequence,&request.text).ok()});
      let mut reply=ProbeResult::selection(request.serial,if state.is_some(){Selection::NoSelection}else{Selection::ClipboardRestoreFailed});
      reply.clipboard_restore=state;reply
     },
-    super::windows_text::TextOrigin::Clipboard(sequence)|super::windows_text::TextOrigin::ObservedClipboard(sequence)=>{
+    super::windows_text::TextOrigin::Clipboard(sequence)|super::windows_text::TextOrigin::ObservedClipboard(sequence)|super::windows_text::TextOrigin::PebrelClipboard(sequence)=>{
      let mut detail=super::windows_copy::ReadDiagnostics::default();
-     let copied=if matches!(request.text.origin,super::windows_text::TextOrigin::ObservedClipboard(_)) {
+     let copied=if matches!(request.text.origin,super::windows_text::TextOrigin::PebrelClipboard(_)) {
+      super::windows_copy::read_pebrel(&request.text,sequence,&mut detail)
+     }else if matches!(request.text.origin,super::windows_text::TextOrigin::ObservedClipboard(_)) {
       super::windows_copy::read_observed(&request.text,sequence,&mut detail)
      }else{super::windows_copy::read_copied(&request.text,sequence,&mut detail)};
      ProbeResult{serial:request.serial,retryable:false,native_verified:false,provider_detail:None,clipboard_read:Some(detail),selection:copied.selection,clipboard_sequence:copied.sequence,clipboard_failure:None,clipboard_ole_formats:None,clipboard_restore:None}
@@ -298,8 +308,8 @@ pub fn helper_entry()->bool{if std::env::args().nth(1).as_deref()!=Some("--words
    if request.text.pid==44 {reply.selection=Selection::SourceMismatch;reply.provider_detail=Some(ProviderDiagnostics{rejected_at:Some(super::super::windows_text::ProviderRejection::UiaFocusChanged),ancestor_count:9});}
    match request.text.origin{
     TextOrigin::Backup=>{reply.selection=Selection::NoSelection;reply.clipboard_sequence=Some(77);},
-    TextOrigin::Restore(sequence)=>{reply.selection=Selection::NoSelection;reply.clipboard_restore=Some(if sequence.is_some(){super::super::windows_copy::RestoreState::Restored}else{super::super::windows_copy::RestoreState::Skipped});},
-    TextOrigin::Clipboard(sequence)|TextOrigin::ObservedClipboard(sequence)=>reply.clipboard_sequence=Some(sequence.wrapping_add(1)),
+    TextOrigin::Restore(sequence)|TextOrigin::PebrelRestore(sequence)=>{reply.selection=Selection::NoSelection;reply.clipboard_restore=Some(if sequence.is_some(){super::super::windows_copy::RestoreState::Restored}else{super::super::windows_copy::RestoreState::Skipped});},
+    TextOrigin::Clipboard(sequence)|TextOrigin::ObservedClipboard(sequence)|TextOrigin::PebrelClipboard(sequence)=>reply.clipboard_sequence=Some(sequence.wrapping_add(1)),
     _=>{},
    }
    if request.text.pid==45 {
@@ -309,6 +319,18 @@ pub fn helper_entry()->bool{if std::env::args().nth(1).as_deref()!=Some("--words
      sequence_matches_before_read:Some(false),source_owner_before_read:Some(true),..Default::default()});
    }
    println!("{PREFIX}{}",serde_json::to_string(&reply).unwrap());std::io::stdout().flush().unwrap();
+  }
+ }
+
+ #[test]fn pebrel_scoped_clipboard_modes_roundtrip_without_widening_standard_origins(){
+  let mut peer=Helper::spawn(&std::env::current_exe().unwrap(),&arguments()).unwrap();let serial=AtomicU64::new(9);
+  for origin in [TextOrigin::Clipboard(11),TextOrigin::ObservedClipboard(11),TextOrigin::PebrelClipboard(11)] {
+   let reply=peer.exchange(&request(9,1,origin),&serial,Duration::from_secs(2)).unwrap();
+   assert_eq!(reply.clipboard_sequence,Some(12));
+  }
+  for origin in [TextOrigin::Restore(Some(11)),TextOrigin::PebrelRestore(Some(11))] {
+   let reply=peer.exchange(&request(9,1,origin),&serial,Duration::from_secs(2)).unwrap();
+   assert_eq!(reply.clipboard_restore,Some(super::super::windows_copy::RestoreState::Restored));
   }
  }
  #[test]fn provider_rejection_metadata_survives_helper_ipc_without_recording_selection_or_identity(){
