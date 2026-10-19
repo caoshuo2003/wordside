@@ -21,15 +21,15 @@ fn static_format(format: &FORMATETC) -> bool {
     format.ptd.is_null() && format.dwAspect == 1 && format.lindex == -1
         && format.cfFormat != 0 && format.tymed & medium_for(u32::from(format.cfFormat)) != 0
 }
-pub(super) fn snapshot(sequence: u32, owner: Handle, bytes: &mut usize) -> Result<Vec<Format>, BackupFailure> { unsafe {
+pub(super) fn snapshot(sequence: u32, owner: Handle, paths: bool, bytes: &mut usize) -> Result<Vec<Format>, BackupFailure> { unsafe {
     OleInitialize(None).map_err(|error| com_error(BackupStage::OleInitialize, None, error))?;
     let _apartment = Apartment;
     // COM pumps synchronous cross-apartment calls while materializing. All COM
     // references/mediums are released before OleUninitialize and blocking stdin.
     let object = OleGetClipboard().map_err(|error| com_error(BackupStage::OleOpen, None, error))?;
-    materialize(&object, bytes, || unchanged(sequence, owner))
+    materialize(&object, paths, bytes, || unchanged(sequence, owner))
 } }
-fn materialize(object: &IDataObject, bytes: &mut usize, current: impl Fn() -> bool) -> Result<Vec<Format>, BackupFailure> { unsafe {
+fn materialize(object: &IDataObject, paths: bool, bytes: &mut usize, current: impl Fn() -> bool) -> Result<Vec<Format>, BackupFailure> { unsafe {
     if !current() { return Err(failure(BackupStage::SourceChanged, None, false)); }
     let enumerator = object.EnumFormatEtc(1).map_err(|error| com_error(BackupStage::OleEnumerate, None, error))?;
     let mut saved: Vec<Format> = Vec::new();
@@ -44,6 +44,8 @@ fn materialize(object: &IDataObject, bytes: &mut usize, current: impl Fn() -> bo
             break;
         }
         let id = u32::from(format.cfFormat);
+        // Copied files on disk keep their paths; see file_contents_view.
+        if paths && file_contents_view(id) { continue; }
         // Never merge distinct FORMATETC payloads with one format identifier.
         if fetched != 1 || !plain || ole_transport(id) || saved.iter().any(|item| item.id == id) {
             return Err(failure(BackupStage::UnsupportedFormat, Some(id), false));
