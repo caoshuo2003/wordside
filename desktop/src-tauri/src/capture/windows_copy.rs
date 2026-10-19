@@ -214,6 +214,15 @@ fn format_name(id: u32) -> String {
 fn ole_transport(id: u32) -> bool {
     id >= 0xc000 && matches!(format_name(id).as_str(), "dataobject" | "ole private data")
 }
+const CF_HDROP: u32 = 15;
+// Explorer describes copied files twice: by path (CF_HDROP, Shell IDList Array,
+// FileName) and as a virtual-file pair, FileGroupDescriptor(W) plus FileContents
+// streams. With CF_HDROP present the pair repeats files that stay on disk, so the
+// backup leaves it out and restore offers the paths. Without paths (zip folders,
+// phones, mail attachments) the streams are the only copy and are still refused.
+fn file_contents_view(id: u32) -> bool {
+    id >= 0xc000 && matches!(format_name(id).as_str(), "filecontents" | "filegroupdescriptor" | "filegroupdescriptorw")
+}
 fn enumerate_formats() -> Result<Vec<u32>, BackupFailure> {
     let mut ids = Vec::new(); let mut id = 0;
     loop {
@@ -358,11 +367,12 @@ impl Backup {
         let original_owner=unsafe{GetClipboardOwner()};
         let result=(||{
             let mut ids = enumerate_formats()?;
+            let paths = ids.contains(&CF_HDROP);
             let mut bytes = 0;
             let mut ole_formats = 0;
             let mut formats = if force_ole || ids.iter().copied().any(ole_transport) {
                 drop(lock); // OLE must open the clipboard itself, never under our lock.
-                let saved = ole::snapshot(before, original_owner, &mut bytes)?;
+                let saved = ole::snapshot(before, original_owner, paths, &mut bytes)?;
                 lock = ClipboardLock::open(owner.0, Duration::from_millis(80))
                     .ok_or_else(|| failure(BackupStage::OpenClipboard, None, true))?;
                 if !ole::unchanged(before, original_owner) { return Err(failure(BackupStage::SourceChanged, None, false)); }
@@ -374,7 +384,7 @@ impl Backup {
             for id in ids {
                 // OLE transport is replaced only after every declared static
                 // payload is materialized. All actual formats remain present.
-                if ole_transport(id) { continue; }
+                if ole_transport(id) || paths && file_contents_view(id) { continue; }
                 unsafe { SetLastError(0); }
                 let source = unsafe { GetClipboardData(id) };
                 let value = if let Some(index) = formats.iter().position(|format| format.id == id) {

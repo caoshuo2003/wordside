@@ -59,25 +59,44 @@ fn saved_bytes(value:&Format,len:usize)->Vec<u8>{unsafe{
     let text:Vec<u8>="before 中文\0".encode_utf16().flat_map(u16::to_le_bytes).collect();
     let id=custom("application/x-moz-custom-clipdata");let private=vec![0,1,2,3,4,5,0];
     let source=provider(vec![(format(13),text.clone()),(format(id),private.clone())]);
-    let saved=materialize(&source,&mut 0,||true).unwrap();drop(source);
+    let saved=materialize(&source,false,&mut 0,||true).unwrap();drop(source);
     assert_eq!(saved.len(),2);assert_eq!(saved_bytes(&saved[0],text.len()),text);assert_eq!(saved_bytes(&saved[1],private.len()),private);
 }
 #[test]fn stream_only_indexed_target_specific_and_conflicting_formats_refuse_before_copy(){
     let ordinary=(format(13),vec![0,0]);
     for invalid in [FORMATETC{tymed:4,..format(1)},FORMATETC{lindex:0,..format(1)},FORMATETC{dwAspect:2,..format(1)}]{
         let source=provider(vec![ordinary.clone(),(invalid,vec![0])]);
-        let error=materialize(&source,&mut 0,||true).err().unwrap();assert_eq!(error.stage,BackupStage::UnsupportedFormat);
+        let error=materialize(&source,false,&mut 0,||true).err().unwrap();assert_eq!(error.stage,BackupStage::UnsupportedFormat);
     }
-    let source=provider(vec![ordinary.clone(),ordinary]);assert_eq!(materialize(&source,&mut 0,||true).err().unwrap().stage,BackupStage::UnsupportedFormat);
+    let source=provider(vec![ordinary.clone(),ordinary]);assert_eq!(materialize(&source,false,&mut 0,||true).err().unwrap().stage,BackupStage::UnsupportedFormat);
     assert!(!static_format(&FORMATETC{ptd:1usize as _,..format(1)}));
 }
 #[test]fn source_replacement_and_size_limit_discard_the_whole_snapshot(){
     let source=provider(vec![(format(13),vec![0,0])]);let calls=std::cell::Cell::new(0);
-    let error=materialize(&source,&mut 0,||{let call=calls.get()+1;calls.set(call);call<3}).err().unwrap();
+    let error=materialize(&source,false,&mut 0,||{let call=calls.get()+1;calls.set(call);call<3}).err().unwrap();
     assert_eq!(error.stage,BackupStage::SourceChanged);
-    assert_eq!(materialize(&source,&mut {MAX_BYTES},||true).err().unwrap().stage,BackupStage::SizeLimit);
+    assert_eq!(materialize(&source,false,&mut {MAX_BYTES},||true).err().unwrap().stage,BackupStage::SizeLimit);
 }
 #[test]fn ole_transport_metadata_declared_as_real_payload_is_not_silently_dropped(){
     let id=custom("DataObject");let source=provider(vec![(format(id),vec![0;8])]);
-    let error=materialize(&source,&mut 0,||true).err().unwrap();assert_eq!(error.stage,BackupStage::UnsupportedFormat);
+    let error=materialize(&source,false,&mut 0,||true).err().unwrap();assert_eq!(error.stage,BackupStage::UnsupportedFormat);
+}
+#[test]fn copied_files_on_disk_keep_their_paths_without_the_virtual_contents_view(){
+    let drop=(format(15),vec![1,2,3,4,5,6]);
+    let names=(format(custom("FileNameW")),vec![b'C',0,0,0]);
+    let descriptor=(format(custom("FileGroupDescriptorW")),vec![1,0,0,0]);
+    let contents=(FORMATETC{tymed:4,..format(custom("FileContents"))},vec![]);
+    let source=provider(vec![drop.clone(),descriptor.clone(),contents.clone(),names.clone()]);
+    let saved=materialize(&source,true,&mut 0,||true).unwrap();
+    assert_eq!(saved.iter().map(|value|value.id).collect::<Vec<_>>(),[15,u32::from(names.0.cfFormat)],"paths are kept and the stream pair is left out");
+    assert_eq!(saved_bytes(&saved[0],drop.1.len()),drop.1);
+    // Virtual files without CF_HDROP have no other copy of their data.
+    let source=provider(vec![descriptor,contents.clone(),names]);
+    let error=materialize(&source,false,&mut 0,||true).err().unwrap();
+    assert_eq!((error.stage,error.format_id),(BackupStage::UnsupportedFormat,Some(u32::from(contents.0.cfFormat))));
+}
+#[test]fn only_the_virtual_file_pair_counts_as_a_second_view_of_copied_files(){
+    for name in ["FileContents","FileGroupDescriptor","FileGroupDescriptorW"] {assert!(file_contents_view(u32::from(custom(name))),"{name}");}
+    for name in ["Shell IDList Array","FileNameW","Preferred DropEffect","DataObject"] {assert!(!file_contents_view(u32::from(custom(name))),"{name}");}
+    assert!(!file_contents_view(CF_HDROP));
 }
