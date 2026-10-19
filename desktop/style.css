@@ -9,6 +9,16 @@ body.dark{--bg:#111915;--paper:#18221d;--tint:#1d3127;--tint2:#18221d;--pill:#22
 body.dark[data-palette=lavender]{--bg:#15131e;--paper:#1c1928;--tint:#272140;--tint2:#1c1928;--pill:#262236;--line:#302b43;--line2:#3d3754;--ink:#ece9f8;--ink2:#c3bcdb;--muted:#9d96b8;--off:#4a4560;--accent:#b9a6f2;--accent-ink:#c7b7f7;--soft:#2f2750;--on-accent:#1a1235;--knob:#ece9f8;--knob-on:#1a1235;--skel:#2a2638;--skel2:#221f2e;--glow:rgba(185,166,242,.08);--selection:#4a3f6b}
 body.dark[data-palette=blue]{--bg:#10161e;--paper:#16202a;--tint:#1a2d42;--tint2:#16202a;--pill:#1f2b39;--line:#283646;--line2:#344558;--ink:#e7eef7;--ink2:#b4c3d5;--muted:#8c9db2;--off:#415064;--accent:#8fbdf5;--accent-ink:#a3c9f8;--soft:#1d3450;--on-accent:#0d1d30;--knob:#e7eef7;--knob-on:#0d1d30;--skel:#223040;--skel2:#1b2632;--glow:rgba(143,189,245,.08);--selection:#2d4a6b}
 body.dark[data-palette=stone]{--bg:#181511;--paper:#211d18;--tint:#2e271f;--tint2:#211d18;--pill:#2c2620;--line:#362f28;--line2:#443b32;--ink:#f4eee7;--ink2:#d2c5b6;--muted:#a99a89;--off:#544a40;--accent:#e0c097;--accent-ink:#e8cca7;--soft:#3b3024;--on-accent:#2a1d10;--knob:#f4eee7;--knob-on:#2a1d10;--skel:#302a23;--skel2:#28231d;--glow:rgba(224,192,151,.08);--selection:#5a4a36}
+/* The brand icon follows the palette and dark mode; light pages on the palette's tile.
+   The tray and window icons use the light set (src-tauri/icons/palette); the exe keeps the paper icon. */
+body{--icon-tile:#a6dcc2;--icon-tile2:#7bbf9f;--icon-left:#ffffff;--icon-left2:#faf8f4;--icon-right:#e2f3ea;--icon-right2:#cde9db;--icon-shadow:rgba(47,122,92,.12)}
+body[data-palette=lavender]{--icon-tile:#c9bef3;--icon-tile2:#a898e6;--icon-right:#efebfe;--icon-right2:#ddd5fa;--icon-shadow:rgba(75,58,143,.12)}
+body[data-palette=blue]{--icon-tile:#aecdf2;--icon-tile2:#82ace0;--icon-right:#e7f0fc;--icon-right2:#d2e2f7;--icon-shadow:rgba(31,90,151,.12)}
+body[data-palette=stone]{--icon-tile:#e0cbb0;--icon-tile2:#c6a784;--icon-right:#f7efe5;--icon-right2:#ebddcb;--icon-shadow:rgba(118,81,47,.12)}
+body.dark{--icon-tile:#4e9c7b;--icon-tile2:#3a7f62;--icon-left:#f4fbf7;--icon-left2:#e6f3ec;--icon-right:#cfe9dc;--icon-right2:#b9decb;--icon-shadow:rgba(0,0,0,.25)}
+body.dark[data-palette=lavender]{--icon-tile:#8e7bd8;--icon-tile2:#7060c0;--icon-left:#f6f3fe;--icon-left2:#ece7fc;--icon-right:#dcd3f7;--icon-right2:#c9bdf2}
+body.dark[data-palette=blue]{--icon-tile:#5f92d2;--icon-tile2:#4676b6;--icon-left:#f2f7fd;--icon-left2:#e4eefb;--icon-right:#cfe0f6;--icon-right2:#bad1f1}
+body.dark[data-palette=stone]{--icon-tile:#b38d64;--icon-tile2:#96714b;--icon-left:#fcf8f2;--icon-left2:#f3eadf;--icon-right:#ebdcc9;--icon-right2:#decab2}
 
 body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC",sans-serif;-webkit-font-smoothing:antialiased}
 ::selection{background:var(--selection)}
@@ -141,7 +151,7 @@ html:has(>.native-main){overflow:hidden}
 .popup-drag-area{flex:1;min-width:0;min-height:36px;display:flex;flex-direction:column;justify-content:center}
 .card h2{margin:2px 0 0;font-family:Cambria,Georgia,"Times New Roman",serif;font-size:30px;line-height:1.15;font-weight:600;letter-spacing:-.2px;overflow-wrap:anywhere}
 .app-mark{display:none;align-items:center;gap:8px;font-size:12.5px;font-weight:600;color:var(--ink2)}
-.app-mark img{display:block}
+.app-mark svg{display:block}
 .card-actions{display:flex;gap:2px}
 .icon-button{display:flex;align-items:center;justify-content:center;width:34px;height:34px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--muted)}
 .icon-button:hover{background:var(--paper);color:var(--ink)}
