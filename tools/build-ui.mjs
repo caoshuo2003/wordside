@@ -10,5 +10,5 @@ const result=spawnSync(process.execPath,[compiler,'-p',join(desktop,'tsconfig.js
 if(result.status!==0)process.exit(result.status||1);
 if(process.argv.includes('--check'))process.exit(0);
 mkdirSync(join(desktop,'dist'),{recursive:true});
-for(const file of ['index.html','style.css','app.js','samples.js','ciban-icon.png'])copyFileSync(join(desktop,file),join(desktop,'dist',file));
+for(const file of ['index.html','style.css','app.js','samples.js'])copyFileSync(join(desktop,file),join(desktop,'dist',file));
 console.log('TypeScript compiled and desktop frontend staged.');

@@ -2,6 +2,7 @@
 mod selection_input;
 mod popup_geometry;
 mod window_frame;
+mod palette_icon;
 mod window_lifecycle;
 mod capture;
 mod dismissal;
@@ -28,7 +29,8 @@ fn decode_settings(bytes:&[u8])->Settings {
     settings
 }
 
-fn valid_palette(value:&str)->bool{["green","lavender","blue","stone"].contains(&value)}
+const PALETTES:[&str;4]=["green","lavender","blue","stone"];
+fn valid_palette(value:&str)->bool{PALETTES.contains(&value)}
 
 struct State {
     settings: Mutex<Settings>, settings_revision:AtomicU64, config: PathBuf, popup_geometry:Mutex<popup_geometry::GeometryState>,
@@ -107,7 +109,8 @@ fn save_appearance(app:tauri::AppHandle,theme:String,palette:String)->Result<Inf
     if !["system","dark","light"].contains(&theme.as_str()){return Err("无效主题".into());}
     if !valid_palette(&palette){return Err("无效配色".into());}
     let state=app.state::<State>();let mut settings=state.settings.lock().unwrap();let mut next=settings.clone();
-    next.theme=theme;next.palette=palette;persist(&state,&next)?;*settings=next;state.settings_revision.fetch_add(1,Ordering::SeqCst);drop(settings);
+    next.theme=theme;next.palette=palette.clone();persist(&state,&next)?;*settings=next;state.settings_revision.fetch_add(1,Ordering::SeqCst);drop(settings);
+    follow_palette(&app,&palette);
     let result=info(&state);let _=app.emit("native-state",&result);Ok(result)
 }
 #[tauri::command]
@@ -189,8 +192,17 @@ async fn lookup(window:tauri::WebviewWindow,state:tauri::State<'_,State>,word:St
 fn show_main(app:&tauri::AppHandle){
     if let Some(w)=app.get_webview_window("main"){let _=w.show();let _=w.set_focus();return;}
     if let Some(config)=app.config().app.windows.iter().find(|c|c.label=="main"){
-        if let Ok(builder)=tauri::WebviewWindowBuilder::from_config(app,config){if let Ok(w)=builder.build(){let _=w.show();let _=w.set_focus();}}
+        if let Ok(builder)=tauri::WebviewWindowBuilder::from_config(app,config){if let Ok(w)=builder.build(){main_icon(&w,&app.state::<State>().settings.lock().unwrap().palette);let _=w.show();let _=w.set_focus();}}
     }
+}
+/// The tray and the main window's title bar, taskbar and Alt+Tab icons follow the palette.
+fn follow_palette(app:&tauri::AppHandle,palette:&str){
+    if let (Some(tray),Some(icon))=(app.tray_by_id("wordside"),palette_icon::tray(palette)){let _=tray.set_icon(Some(icon));}
+    if let Some(main)=app.get_webview_window("main"){main_icon(&main,palette);}
+}
+fn main_icon(window:&tauri::WebviewWindow,palette:&str){
+    #[cfg(windows)]if let Ok(hwnd)=window.hwnd(){palette_icon::apply(hwnd.0 as isize,palette);}
+    #[cfg(not(windows))]let _=(window,palette);
 }
 fn main(){
     #[cfg(windows)]if std::env::args().nth(1).as_deref()==Some("--wordside-dictionary-licenses"){print!("{}",include_str!("../generated/THIRD-PARTY-LICENSES.txt"));return;}
@@ -203,19 +215,20 @@ fn main(){
             let config=app.path().app_config_dir()?.join("settings.json");
             let mut settings=fs::read(&config).ok().map(|bytes|decode_settings(&bytes)).unwrap_or_default();
             if !cfg!(windows){settings.enabled=false;}
-            let enabled=settings.enabled;
+            let enabled=settings.enabled;let palette=settings.palette.clone();
             app.manage(State{#[cfg(windows)]hotkeys:Arc::new(capture::hotkey::Control::default()),settings:Mutex::new(settings),settings_revision:AtomicU64::new(0),config,popup_geometry:Mutex::new(popup_geometry::GeometryState::default()),hotkey_save:Mutex::new(()),enabled:AtomicBool::new(enabled),pinned:AtomicBool::new(false),ready:AtomicBool::new(false),lookup_serial:AtomicU64::new(0),main_epoch:AtomicU64::new(0),popup_epoch:AtomicU64::new(0),capture_epoch:AtomicU64::new(0),capture_serial:AtomicU64::new(0),cache:Mutex::new(cache::Cache::default()),gates:Mutex::new(HashMap::new()),dictionary:dictionary::Backend::default()});
             // A new WebView may invoke commands while Windows pumps messages
             // during construction. Manage State before creating either view.
             for config in app.config().app.windows.clone() {
-                tauri::WebviewWindowBuilder::from_config(app,&config)?.build()?;
+                let window=tauri::WebviewWindowBuilder::from_config(app,&config)?.build()?;
+                if window.label()=="main"{main_icon(&window,&palette);}
             }
             let toggle=CheckMenuItem::with_id(app,"toggle","自动划词",true,enabled,None::<&str>)?;
             let show=MenuItem::with_id(app,"show","打开 WordSide",true,None::<&str>)?;
             let quit=MenuItem::with_id(app,"quit","退出",true,None::<&str>)?;
             let menu=Menu::with_items(app,&[&toggle,&show,&quit])?;
             let check=toggle.clone();
-            TrayIconBuilder::with_id("wordside").icon(tauri::image::Image::from_bytes(include_bytes!("../icons/ciban-32.png"))?).menu(&menu).show_menu_on_left_click(false).tooltip("WordSide · 桌面划词词典")
+            TrayIconBuilder::with_id("wordside").icon(palette_icon::tray(&palette).ok_or("WordSide tray icon is missing")?).menu(&menu).show_menu_on_left_click(false).tooltip("WordSide · 桌面划词词典")
             .on_tray_icon_event(|tray,event|{if window_lifecycle::opens_main(&event){show_main(tray.app_handle());}}).on_menu_event(move|app,event|match event.id.as_ref(){
                 "toggle"=>{let value=!app.state::<State>().enabled.load(Ordering::SeqCst);if apply_enabled(app,value).is_ok(){let _=check.set_checked(value);}},
                 "show"=>show_main(app),
@@ -234,6 +247,9 @@ fn main(){
             }
         })
         .on_window_event(|window,event|{
+            if window.label()=="main" && matches!(event,tauri::WindowEvent::ScaleFactorChanged{..}) {
+                if let Some(main)=window.get_webview_window("main"){main_icon(&main,&window.state::<State>().settings.lock().unwrap().palette);}
+            }
             if window.label()=="popup" {match event {
                 tauri::WindowEvent::Resized(size)=>popup_resized(window,*size),
                 tauri::WindowEvent::ScaleFactorChanged{..}=>{

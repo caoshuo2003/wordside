@@ -5,10 +5,10 @@
 | 文件 | 内容 |
 |---|---|
 | `images/overview.png` | 首页展示：当前日间/夜间浮窗与软件图标组成 |
-| `images/settings-light.png` | 设置窗口，440×540 |
-| `images/popup-light.png` | 雾紫日间释义，360×600 |
-| `images/popup-dark.png` | 浅蓝夜间释义，360×600 |
-| `images/suggestions.png` | 未找到词条后的候选示例 |
+| `images/settings-light.png` | 设置窗口，薄荷绿日间，440×580 |
+| `images/popup-light.png` | 薄荷绿日间释义，360×600 |
+| `images/popup-dark.png` | 雾紫夜间释义，360×600 |
+| `images/suggestions.png` | 未找到词条后的候选示例，浅蓝日间 |
 
 图片类型为**界面预览**。真实应用取词和安装的验证范围见[本版说明](releases/v0.1.0.md)。示例词典内容的来源与权利说明见 [NOTICE](../NOTICE.md)。
 

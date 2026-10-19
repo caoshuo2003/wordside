@@ -2,10 +2,11 @@ if(nativeAPI){
   document.body.classList.add(isPopup?'native-popup':'native-main');
   if(!isPopup)get('native-capture-toggle').append(enabled.closest('label')!);
   // Windows 11 draws the caption, border and corners; tint them with the current palette.
+  // The settings caption continues the tinted header below it.
   let frameKey='';
   const syncFrame=(force=false)=>{
     const style=getComputedStyle(document.body),token=(name:string)=>style.getPropertyValue(name).trim(),dark=document.body.classList.contains('dark');
-    const frame=isPopup?{border:token('--card-line'),caption:token('--card'),text:null,dark}:{border:token('--line'),caption:token('--bg'),text:token('--text'),dark};
+    const frame=isPopup?{border:token('--line'),caption:token('--paper'),text:null,dark}:{border:token('--line'),caption:token('--tint'),text:token('--ink'),dark};
     const key=JSON.stringify(frame);if(!frame.border||(!force&&key===frameKey))return;frameKey=key;
     void nativeAPI!.core.invoke<boolean>('set_window_frame',frame).then(drawn=>document.body.classList.toggle('system-frame',drawn)).catch(()=>{});
   };
@@ -16,13 +17,14 @@ if(nativeAPI){
   const note=get('native-status');
   const hotkeyInput=get<HTMLInputElement>('lookup-hotkey');
   const hotkeyStatus=get('shortcut-status');const hotkeyBadge=get('shortcut-badge');const record=get<HTMLButtonElement>('record-hotkey');
-  let recording=false, captureSerial=0, captureActive=false;
+  let recording=false, captureSerial=0, captureActive=false, savedHotkey=hotkeyInput.value;
   const closeBehavior=get<HTMLSelectElement>('close-behavior');const closeStatus=get('close-status');
   let closePending=false,closeConfirmed=false,confirmedCloseBehavior=closeBehavior.value,lastSettingsRevision=-1;
   let appearancePending=0;
   let appearanceQueue:Promise<void>=Promise.resolve();
   function hotkeyMessage(message:string,error=false){hotkeyStatus.textContent=message;hotkeyStatus.hidden=!message;hotkeyStatus.dataset.state=error?'error':'ok';}
-  function stopRecording(){recording=false;record.textContent='录入按键';record.setAttribute('aria-pressed','false');}
+  function showHotkey(){renderHotkey(hotkeyInput.value,{recording,dirty:hotkeyInput.value!==savedHotkey});}
+  function stopRecording(){recording=false;record.setAttribute('aria-pressed','false');showHotkey();}
   function acceptsCapture(payload:{serial?:number}){
     if(payload.serial===undefined)return true;
     return payload.serial>=captureSerial&&(payload.serial>captureSerial||captureActive);
@@ -42,7 +44,7 @@ if(nativeAPI){
     note.textContent=info.version?'版本 '+info.version:'';
     confirmedCloseBehavior=info.settings.close_behavior==='exit'?'exit':'tray';closeConfirmed=true;
     if(!closePending){closeBehavior.value=confirmedCloseBehavior;closeBehavior.disabled=false;}
-    if(!recording)hotkeyInput.value=info.settings.lookup_hotkey??'Ctrl+Alt+A';
+    savedHotkey=info.settings.lookup_hotkey??'Ctrl+Alt+A';if(!recording)hotkeyInput.value=savedHotkey;showHotkey();
     const status=info.hotkey;hotkeyBadge.dataset.state=status?.error?'error':status?.active?'active':'inactive';
     hotkeyBadge.textContent=status?.error?'需要调整':status?.active?'已启用':'未启用';
     if(!recording)hotkeyMessage((status?.error?shortcutNotice(status.error):'')||(status?.active||!hotkeyInput.value?'':'正在启用快捷键…'),Boolean(status?.error));
@@ -50,7 +52,7 @@ if(nativeAPI){
   }
   record.addEventListener('click',()=>{
     if(recording){stopRecording();hotkeyMessage('');return;}
-    recording=true;record.textContent='取消录入';record.setAttribute('aria-pressed','true');hotkeyMessage('按下组合键，Esc 取消。');hotkeyInput.focus();
+    recording=true;record.setAttribute('aria-pressed','true');hotkeyMessage('');showHotkey();hotkeyInput.focus();
   });
   document.addEventListener('keydown',event=>{
     if(!recording)return;event.preventDefault();event.stopImmediatePropagation();
@@ -60,15 +62,21 @@ if(nativeAPI){
     if(event.metaKey||(!event.ctrlKey&&!event.altKey)||!/^([A-Z0-9]|F([1-9]|1[0-9]|2[0-4]))$/.test(key)||key==='F12'){
       hotkeyMessage('请使用 Ctrl 或 Alt 搭配字母、数字或功能键（F12 除外）。',true);return;
     }
-    hotkeyInput.value=[event.ctrlKey?'Ctrl':'',event.altKey?'Alt':'',event.shiftKey?'Shift':'',key].filter(Boolean).join('+');stopRecording();hotkeyMessage('保存后生效。');
+    hotkeyInput.value=[event.ctrlKey?'Ctrl':'',event.altKey?'Alt':'',event.shiftKey?'Shift':'',key].filter(Boolean).join('+');stopRecording();hotkeyMessage(hotkeyInput.value===savedHotkey?'':'保存后生效。');
   },true);
-  get('save-hotkey').addEventListener('click',()=>{
+  // 停用 saves an empty shortcut; while an unsaved change is shown it reads 撤销 and restores the saved one.
+  get('disable-hotkey').addEventListener('click',()=>{
+    if(hotkeyInput.value!==savedHotkey){hotkeyInput.value=savedHotkey;hotkeyMessage('');showHotkey();return;}
+    hotkeyInput.value='';saveHotkey();
+  });
+  get('save-hotkey').addEventListener('click',()=>saveHotkey());
+  function saveHotkey(){
     stopRecording();const button=get<HTMLButtonElement>('save-hotkey');button.disabled=true;
     void nativeAPI!.core.invoke<NativeInfo>('save_lookup_hotkey',{hotkey:hotkeyInput.value}).then(info=>{applyNative(info);}).catch(async error=>{
       try{applyNative(await nativeAPI!.core.invoke<NativeInfo>('get_settings'));}catch{}
       hotkeyMessage(shortcutNotice(error),true);
     }).finally(()=>{button.disabled=false;});
-  });
+  }
   enabled.addEventListener('change',()=>{
     void nativeAPI!.core.invoke<NativeInfo>('set_enabled',{enabled:enabled.checked}).then(applyNative).catch(async()=>{try{applyNative(await nativeAPI!.core.invoke<NativeInfo>('get_settings'));}catch{}note.textContent='自动划词设置未保存，请稍后再试。';});
   });
