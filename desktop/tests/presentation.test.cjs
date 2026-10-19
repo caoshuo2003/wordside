@@ -6,8 +6,8 @@ const ts=require('typescript');
 const shared=fs.readFileSync(require.resolve('../../shared/dictionary.ts'),'utf8');
 const presentation=fs.readFileSync(require.resolve('../src/presentation.ts'),'utf8');
 const context={URL,Error,DOMException};
-vm.runInNewContext(ts.transpileModule(shared+'\n'+presentation+'\nglobalThis.product={readApiEntry,normalizeSelection,lookupNotice,captureNotice,shortcutNotice};',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,context);
-const {readApiEntry,normalizeSelection,lookupNotice,captureNotice,shortcutNotice}=context.product;
+vm.runInNewContext(ts.transpileModule(shared+'\n'+presentation+'\nglobalThis.product={readApiEntry,normalizeSelection,lookupNotice,captureNotice,shortcutNotice,posLabel,pronunciationChips,sourceLabel};',{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText,context);
+const {readApiEntry,normalizeSelection,lookupNotice,captureNotice,shortcutNotice,posLabel,pronunciationChips,sourceLabel}=context.product;
 const raw='API HTTP 502 definition.translation UNKNOWN_OS_ERROR';
 function failure(payload){try{readApiEntry(payload,'termnal');assert.fail('must reject payload');}catch(error){return error;}}
 function notice(payload){return lookupNotice(failure(payload));}
@@ -49,4 +49,31 @@ test('shortcut failures preserve useful conflict guidance without exposing raw e
  assert.match(shortcutNotice('快捷键服务未响应，请重新启动 WordSide。'),/重启/);
  assert.match(shortcutNotice('快捷键修饰键重复。'),/Ctrl 或 Alt/);
  for(const value of [raw,new Error(raw),undefined])assert.equal(shortcutNotice(value),'快捷键未能保存，请稍后再试。');
+});
+test('parts of speech read in Chinese without grammar codes, unknown ones stay readable',()=>{
+ assert.deepEqual({...posLabel('noun [ C ]')},{zh:'名词',en:'noun'});
+ assert.deepEqual({...posLabel('Phrasal verb')},{zh:'短语动词',en:'phrasal verb'});
+ assert.deepEqual({...posLabel('suffix')},{zh:'后缀',en:'suffix'});
+ assert.deepEqual({...posLabel('combining form')},{zh:'构词成分',en:'combining form'});
+ assert.deepEqual({...posLabel('toString')},{zh:'tostring',en:'tostring'},'inherited names are not labels');
+});
+test('Cambridge dataset ids read as dictionary names, unknown ids stay as given',()=>{
+ assert.equal(sourceLabel('cbed'),'剑桥商务英语');
+ assert.equal(sourceLabel('CALD4'),'剑桥高阶英语');
+ assert.equal(sourceLabel('xyz'),'xyz');
+ assert.equal(sourceLabel('constructor'),'constructor');
+});
+const plain=value=>JSON.parse(JSON.stringify(value));
+test('identical readings collapse to one chip per accent; differing readings keep every sound',()=>{
+ const url=lang=>'https://dictionary.cambridge.org/media/'+lang+'.mp3';
+ const run=pronunciationChips([
+  {pos:'verb',lang:'uk',pron:'/rʌn/',url:url('uk')},{pos:'verb',lang:'us',pron:'/rʌn/',url:url('us')},
+  {pos:'noun',lang:'uk',pron:'/rʌn/',url:''},{pos:'noun',lang:'us',pron:'/rʌn/',url:url('us2')}]);
+ assert.deepEqual(plain(run),[{lang:'英',pron:'/rʌn/',url:url('uk'),pos:''},{lang:'美',pron:'/rʌn/',url:url('us'),pos:''}]);
+ const record=pronunciationChips([
+  {pos:'noun',lang:'uk',pron:'/ˈrek.ɔːd/',url:''},{pos:'adjective',lang:'uk',pron:'/ˈrek.ɔːd/',url:url('a')},
+  {pos:'verb',lang:'uk',pron:'/rɪˈkɔːd/',url:url('v')},{pos:'noun',lang:'us',pron:'/ˈrek.ɚd/',url:''}]);
+ assert.deepEqual(plain(record),[
+  {lang:'英',pron:'/ˈrek.ɔːd/',url:url('a'),pos:'名词/形容词'},{lang:'英',pron:'/rɪˈkɔːd/',url:url('v'),pos:'动词'},{lang:'美',pron:'/ˈrek.ɚd/',url:'',pos:''}]);
+ assert.deepEqual(pronunciationChips([{pos:'noun',lang:'uk',pron:'  ',url:''}]).length,0);
 });

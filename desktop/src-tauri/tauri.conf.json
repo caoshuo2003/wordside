@@ -14,9 +14,9 @@
         "title": "WordSide · 桌面划词词典",
         "url": "index.html",
         "width": 440,
-        "height": 540,
+        "height": 580,
         "minWidth": 400,
-        "minHeight": 520,
+        "minHeight": 540,
         "create": false
       },
       {

@@ -9,7 +9,8 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 
 function fixture({popup=true,failSettings=0,failReady=0,failListener='',pendingListener='',frameDrawn=true}={}){
   const frameCalls=[],bodyClasses=new Set(),observers=[],mediaListeners=[];
-  let styleVars={'--card-line':'#e0e7df','--card':'#fbfdfb','--line':'#d9e3db','--bg':'#f2f5f2','--text':'#293930'};
+  let styleVars={'--line':'#dceae2','--paper':'#ffffff','--tint':'#e0f2e8','--ink':'#13221b'};
+  const hotkeyRenders=[],hotkeySaves=[],documentEvents=new Map();
   const elements=new Map(),listeners=new Map(),windowEvents=new Map(),timers=new Map(),lookupCalls=[],registered=[];
   let timerId=0,settingsCalls=0,readyCalls=0,failedListener=false,pendingResolve;
   const readySnapshots=[];
@@ -27,6 +28,7 @@ function fixture({popup=true,failSettings=0,failReady=0,failListener='',pendingL
   const api={
     core:{async invoke(command,args){
       if(command==='set_window_frame'){frameCalls.push({...args});return frameDrawn;}
+      if(command==='save_lookup_hotkey'){hotkeySaves.push(args.hotkey);current={...current,settings_revision:current.settings_revision+1,settings:{...current.settings,lookup_hotkey:args.hotkey}};return current;}
       if(command==='get_settings'){
         settingsCalls++;
         if(settingsCalls<=failSettings)throw new Error('temporary state unavailable');
@@ -51,19 +53,21 @@ function fixture({popup=true,failSettings=0,failReady=0,failListener='',pendingL
     nativeAPI:api,isPopup:popup,get:element,enabled,
     theme:element('theme'),palette:element('palette'),pin:element('pin'),card:element('card'),
     pinned:false,manualLookup:false,selectedPalette:'green',
-    document:{body:{classList:{add(name){bodyClasses.add(name);},contains(name){return bodyClasses.has(name);},toggle(name,force){if(force)bodyClasses.add(name);else bodyClasses.delete(name);}}},addEventListener(){},},
+    document:{body:{classList:{add(name){bodyClasses.add(name);},contains(name){return bodyClasses.has(name);},toggle(name,force){if(force)bodyClasses.add(name);else bodyClasses.delete(name);}}},addEventListener(name,fn){documentEvents.set(name,fn);},},
     getComputedStyle:()=>({getPropertyValue:name=>styleVars[name]??''}),
     MutationObserver:class{constructor(callback){observers.push(callback);}observe(){}},
     matchMedia:()=>({matches:false,addEventListener(name,callback){mediaListeners.push(callback);}}),
     window:{addEventListener(name,fn){windowEvents.set(name,fn);}},
     updateStatus(){},prepareCapture(){},closeCard(){},applyTheme(){},applyPalette(){},remember(){},
-    shortcutNotice:value=>String(value),lookup(...args){lookupCalls.push(args);},showCaptureFailure(){},
+    shortcutNotice:value=>String(value),renderHotkey(value,state){hotkeyRenders.push({value,...state});},lookup(...args){lookupCalls.push(args);},showCaptureFailure(){},
     setTimeout(fn,delay){const id=++timerId;timers.set(id,{fn,delay});return id;},
     clearTimeout(id){timers.delete(id);},
   };
   vm.runInNewContext(script,context);
   return {
-    enabled,element,readySnapshots,frameCalls,bodyClasses,
+    enabled,element,readySnapshots,frameCalls,bodyClasses,hotkeyRenders,hotkeySaves,
+    click(id){element(id).events.get('click')();},
+    press(key,modifiers={}){documentEvents.get('keydown')({key,code:'Key'+key,ctrlKey:false,altKey:false,shiftKey:false,metaKey:false,...modifiers,preventDefault(){},stopImmediatePropagation(){}});},
     restyle(vars,dark){styleVars={...styleVars,...vars};if(dark)bodyClasses.add('dark');for(const callback of observers)callback();},
     changeSystemTheme(){for(const callback of mediaListeners)callback();},listeners,timers,lookupCalls,registered,
     get settingsCalls(){return settingsCalls;},get readyCalls(){return readyCalls;},
@@ -145,15 +149,35 @@ test('a listener that resolves after the window closes is immediately released',
 });
 test('window frames follow the page palette and skip unchanged colors',async()=>{
   const popup=fixture();await flush();
-  assert.deepEqual(popup.frameCalls,[{border:'#e0e7df',caption:'#fbfdfb',text:null,dark:false}]);
+  assert.deepEqual(popup.frameCalls,[{border:'#dceae2',caption:'#ffffff',text:null,dark:false}]);
   assert.ok(popup.bodyClasses.has('system-frame'),'the Windows 11 border replaces the page border');
   popup.restyle({});await flush();
   assert.equal(popup.frameCalls.length,1,'class changes that keep the palette are ignored');
-  popup.restyle({'--card-line':'#403c4c','--card':'#24232b'},true);await flush();
-  assert.deepEqual(popup.frameCalls.at(-1),{border:'#403c4c',caption:'#24232b',text:null,dark:true});
+  popup.restyle({'--line':'#302b43','--paper':'#1c1928'},true);await flush();
+  assert.deepEqual(popup.frameCalls.at(-1),{border:'#302b43',caption:'#1c1928',text:null,dark:true});
   popup.changeSystemTheme();await flush();
   assert.equal(popup.frameCalls.length,3,'a system theme change re-applies the caption buttons');
   const main=fixture({popup:false,frameDrawn:false});await flush();
-  assert.deepEqual(main.frameCalls,[{border:'#d9e3db',caption:'#f2f5f2',text:'#293930',dark:false}]);
+  assert.deepEqual(main.frameCalls,[{border:'#dceae2',caption:'#e0f2e8',text:'#13221b',dark:false}],'the caption continues the tinted header');
   assert.ok(!main.bodyClasses.has('system-frame'),'older Windows keeps the page border');
+});
+test('shortcut keycaps: record, undo, save and turn off',async()=>{
+  const app=fixture({popup:false});await flush();
+  const last=()=>app.hotkeyRenders.at(-1);
+  assert.deepEqual(last(),{value:'Ctrl+Alt+A',recording:false,dirty:false});
+  app.click('record-hotkey');
+  assert.equal(last().recording,true);
+  app.press('D',{altKey:true});
+  assert.deepEqual(last(),{value:'Alt+D',recording:false,dirty:true},'a recorded shortcut waits for 保存');
+  app.click('disable-hotkey');
+  assert.deepEqual(last(),{value:'Ctrl+Alt+A',recording:false,dirty:false},'with an unsaved change the second button undoes it');
+  assert.deepEqual(app.hotkeySaves,[]);
+  app.click('record-hotkey');app.press('D',{altKey:true});app.click('save-hotkey');await flush();
+  assert.deepEqual(app.hotkeySaves,['Alt+D']);
+  assert.deepEqual(last(),{value:'Alt+D',recording:false,dirty:false});
+  app.click('disable-hotkey');await flush();
+  assert.deepEqual(app.hotkeySaves,['Alt+D',''],'停用 saves an empty shortcut');
+  assert.deepEqual(last(),{value:'',recording:false,dirty:false});
+  app.click('record-hotkey');app.press('Q');
+  assert.equal(last().recording,true,'a key without Ctrl or Alt keeps recording');
 });
