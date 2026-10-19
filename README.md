@@ -3,9 +3,9 @@
 </p>
 <h1 align="center">WordSide · 词伴</h1>
 <p align="center">选中一个词，读懂它。<br>一个安静、紧凑的 Windows 划词词典。</p>
-<p align="center"><strong>0.1.4 · Windows x64 · Cambridge Dictionary</strong></p>
+<p align="center"><strong>0.2.0 · Windows x64 · Cambridge Dictionary</strong></p>
 <p align="center">
-  <a href="https://github.com/caoshuo2003/wordside/releases/tag/v0.1.4">下载 WordSide</a> ·
+  <a href="https://github.com/caoshuo2003/wordside/releases/tag/v0.2.0">下载 WordSide</a> ·
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
   <a href="docs/FAQ.md">常见问题</a> ·
   <a href="docs/PRIVACY.md">隐私与数据</a>
@@ -13,20 +13,20 @@
 
 **WordSide · 词伴** 是一款 Windows 划词词典，帮你在阅读旁查看 Cambridge Dictionary 的释义、音标、例句与发音。开启自动划词后，在支持读取选区的应用里选中英文单词，即可弹出浮窗；也可以按快捷键主动查询。
 
-![WordSide · 词伴日间与夜间界面](docs/images/overview.png)
+![WordSide · 词伴：选中单词，释义在旁边展开](docs/images/hero.png)
 
 *界面预览，使用示例词条。[图片说明](docs/SCREENSHOTS.md)*
 
-**0.1.4 更新**：修复刚启动或长时间闲置后取词无反应、Chrome 网页误提示“请重新选词”，改善 Pebrel 取词；浮窗与主窗口外观更新。[查看本版变化](docs/releases/v0.1.4.md)
+**0.2.0 更新**：界面和图标全新设计，四套配色整窗染色，托盘和窗口图标跟着配色变；修复剪贴板里放着复制的文件时网页无法取词。[查看本版变化](docs/releases/v0.2.0.md)
 
 ## 下载与开始
 
-从 [0.1.4 发布页](https://github.com/caoshuo2003/wordside/releases/tag/v0.1.4) 下载，选择一种方式即可：
+从 [0.2.0 发布页](https://github.com/caoshuo2003/wordside/releases/tag/v0.2.0) 下载，选择一种方式即可：
 
 | 方式 | 下载 | 使用方式 |
 |---|---|---|
-| 安装版 · 推荐 | [Windows x64 安装包](https://github.com/caoshuo2003/wordside/releases/download/v0.1.4/WordSide_0.1.4_x64-setup.exe) | 按提示安装，然后打开 WordSide |
-| 便携版 | [ZIP 压缩包](https://github.com/caoshuo2003/wordside/releases/download/v0.1.4/WordSide_0.1.4-portable.zip) | 解压全部文件，运行其中的 WordSide |
+| 安装版 · 推荐 | [Windows x64 安装包](https://github.com/caoshuo2003/wordside/releases/download/v0.2.0/WordSide_0.2.0_x64-setup.exe) | 按提示安装，然后打开 WordSide |
+| 便携版 | [ZIP 压缩包](https://github.com/caoshuo2003/wordside/releases/download/v0.2.0/WordSide_0.2.0-portable.zip) | 解压全部文件，运行其中的 WordSide |
 
 需要 **Windows x64**、**Microsoft Edge WebView2** 和能访问 Cambridge 的网络。查词功能已内置，安装后即可开始。
 
@@ -34,9 +34,15 @@
 2. 想选中就查，打开“自动划词”；想自己触发，选中单词后按 **Ctrl+Alt+A**。快捷键可以在设置里修改。
 3. 把浮窗拖到顺手的位置，调整大小，再选一套喜欢的配色。
 
-[完整使用指南](docs/USER-GUIDE.md) · [安装问题](docs/FAQ.md#安装与运行) · [取词与已知限制](docs/FAQ.md#取词与快捷键) · [隐私与数据](docs/PRIVACY.md) · [本版说明](docs/releases/v0.1.4.md)
+[完整使用指南](docs/USER-GUIDE.md) · [安装问题](docs/FAQ.md#安装与运行) · [取词与已知限制](docs/FAQ.md#取词与快捷键) · [隐私与数据](docs/PRIVACY.md) · [本版说明](docs/releases/v0.2.0.md)
 
-## 查词时，你可以
+## 功能一览
+
+![三种方式，随手就查：自动划词、快捷键和手动输入](docs/images/feature-capture.png)
+
+![一个浮窗，读懂一个词：发音、词性、释义、例句和原词典](docs/images/feature-popup.png)
+
+![四套配色，日夜随心](docs/images/feature-palettes.png)
 
 | 体验 | 使用方式 |
 |---|---|
@@ -44,7 +50,7 @@
 | 看释义、听发音 | 阅读英汉或英文释义、例句与音标，点击播放英式或美式发音 |
 | 调整浮窗 | 拖动、缩放，自动记住大小；固定后在同一窗口继续查新词 |
 | 少操心一点选词 | 自动清理首尾标点；没查到时，查看词典提供的拼写建议 |
-| 换一种阅读氛围 | 薄荷绿、雾紫、浅蓝、暖灰，搭配日间、夜间或跟随系统 |
+| 换一种阅读氛围 | 薄荷绿、雾紫、浅蓝、暖灰，搭配日间、夜间或跟随系统；托盘和窗口图标随之换色 |
 | 随时收起或退出 | 关闭主窗口时选择隐藏到托盘或退出，双击托盘重新打开 |
 
 取词效果会随应用和文本区域而变化。读不到选区时，可以在 WordSide 中手动输入继续查词；Windows 桌面终端中的选词也遵循这一规则。连接或速度问题见[网络与速度](docs/FAQ.md#网络与速度)。
