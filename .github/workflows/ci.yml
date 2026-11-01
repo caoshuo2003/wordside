@@ -55,6 +55,9 @@ jobs:
           rustup show active-toolchain
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo --version
+      - name: Check Rust formatting
+        working-directory: desktop/src-tauri
+        run: cargo fmt --all -- --check
       - name: Test native dictionary and application logic
         run: ./tools/windows-cargo.ps1 -Action test
       - name: Test selection and hotkey logic (no desktop or system clipboard)
