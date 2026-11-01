@@ -158,9 +158,8 @@ impl Backend {
             Ok(html) => {
                 // CPU-only, bounded HTML work runs away from the webview/async executor.
                 // Keep the slot inside the closure if its caller cancels while parsing.
-                let parsing = tauri::async_runtime::spawn_blocking(move || {
-                    (parser::parse_page(&html), permit)
-                });
+                let parsing =
+                    tokio::task::spawn_blocking(move || (parser::parse_page(&html), permit));
                 let (result, permit) =
                     tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), parsing)
                         .await
@@ -191,7 +190,7 @@ impl Backend {
                     .await?;
                 let language = language.to_owned();
                 let word = word.to_owned();
-                tauri::async_runtime::spawn_blocking(move || {
+                tokio::task::spawn_blocking(move || {
                     let _permit = permit;
                     parser::parse_suggestions(&html, &language, &word)
                 })

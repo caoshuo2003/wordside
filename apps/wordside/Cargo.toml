@@ -1,0 +1,25 @@
+[package]
+name = "wordside"
+version = "0.2.0"
+edition = "2021"
+description = "A small, quiet selection dictionary for Windows"
+
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "system-proxy"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "sync", "net", "io-util"] }
+dom_query = { version = "=0.28.0", default-features = false }
+regex = "1"
+
+[lints.clippy]
+dbg_macro = "warn"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
