@@ -1,17 +1,17 @@
-# WordSide 产品开发文档（重构版）
+# WordSide 产品开发文档
 
 | 项目 | 内容 |
 |---|---|
-| 重构基线 | `v0.2.0`（提交 `9da0577`） |
-| 目标版本 | `0.3.0`，用户可见行为与 0.2.0 一致 |
+| 基线 | `v0.2.0`（提交 `9da0577`） |
+| 目标版本 | `0.3.0`：工程整理加 7.2 节的产品改进 |
 | 状态 | 草案，里程碑开始前可调整 |
 | 相关文档 | [架构](ARCHITECTURE.md) · [开发指南](DEVELOPMENT.md) · [贡献约定](../CONTRIBUTING.md) · [发布流程](RELEASING.md) |
 
 **本文的三个前提：**
 
-1. “同样的 workflow”同时指产品工作流（第 2 节）和开发工作流（第 8 节），两者都不改。
-2. 重构是渐进式的，继续使用 Tauri 2 + Rust + TypeScript，不重写，也不换技术栈。
-3. 重构期间不加新功能。路线图里的代理设置、Linux 等排到 0.3.0 之后。
+1. 目标是让产品更好更完善，不是单纯重写代码。核心工作流（第 2 节）和开发工作流（第 8 节）保持不变。
+2. 渐进式改进，继续使用 Tauri 2 + Rust + TypeScript，不重写，也不换技术栈。
+3. 工程整理和产品改进分开提交：`refactor:` 不改行为，改进走 `feat:` 或 `fix:`。优先做 7.2 节的改进；路线图里的代理设置、Linux 等排到 0.3.0 之后。
 
 ---
 
@@ -106,7 +106,7 @@ flowchart TD
 | 界面 | `desktop/src/`、`shared/` | 约 54 KB TS，25 KB CSS | 无框架，`tsc` 用 `outFile` 合并 |
 | 对照模块 | `modules/cambridge-dictionary-api/` | 约 58 KB JS | 不进发布包，只用来校对 Rust 解析行为 |
 
-**测试：** Rust 至少 212 个 `#[test]`，JS 54 个。
+**测试：** Rust 测试二进制 226 个用例，`npm test` 66 个。
 
 ### 5.2 前后端接口（重构时冻结）
 
@@ -126,7 +126,7 @@ flowchart TD
 | 编号 | 优先级 | 问题 | 证据 | 处理里程碑 |
 |---|---|---|---|---|
 | P-01 | 高 | `main.rs` 同时承担设置模型、持久化、全部命令、查询编排、托盘、窗口事件和 CLI 诊断 | `main.rs:18-64,167-191,207-274,346-383` | M3 |
-| P-02 | 高 | 取词测试没有安全的默认入口：默认跳过 `capture::`，要靠 16 个过滤器逐个运行；宽泛的 `capture::` 过滤器还会碰到操作窗口的实机夹具 | `windows-cargo.ps1:71`、`ci.yml:62-79`、DEVELOPMENT | M1 |
+| P-02 | 高 | 取词测试没有安全的默认入口：默认跳过 `capture::`，要靠 16 个过滤器逐个运行；宽泛的 `capture::` 过滤器还会碰到操作窗口的实机夹具。此外有 9 个用例不在任何过滤器内，CI 从未运行，其中 5 个没有标记 `#[ignore]`，看不出是被有意跳过 | `windows-cargo.ps1:71`、`ci.yml:62-79`、DEVELOPMENT | M1 |
 | P-03 | 高 | 过滤器清单写了两份并已漂移：DEVELOPMENT 缺 `windows_edit`、`dismissal` | `ci.yml:77-78` 对比 `DEVELOPMENT.md:62-77` | M1 |
 | P-04 | 高 | 没有格式和 lint 门禁，存在超长行：`probe.rs` 最长 794 字符，`main.rs` 最长 633 字符，且有 14 行超过 200 字符 | `main.rs:219`；CI 无 fmt / clippy 步骤 | M1 |
 | P-05 | 高 | `windows.rs`（828 行）、`windows_copy.rs`（982 行）、`probe.rs`（545 行）把决策逻辑和 `unsafe` Win32 调用混在一起，只能靠实机验证 | `unsafe` 集中在 `windows_copy.rs`（58 处匹配）、`windows.rs`（25 处匹配） | M5 |
@@ -170,22 +170,26 @@ shared/dictionary.ts      改成带 export 的模块，继续作为 JSON 校验�
 | 实机测试如何隔离 | 改用 `#[ignore]`，另设显式命令运行 | `cargo test` 默认就安全，不再需要过滤器清单 |
 | 词条类型 | Rust 用类型化结构，序列化出的 JSON 与现在逐字节一致 | 用现有 `native-cambridge.json` 夹具保证 |
 
-## 7. 重构里程碑
+## 7. 开发里程碑
+
+**总体策略：** 重点拆应用层，取词层尽量少动。产品已经可用；取词代码的稳定性是实机反复调出来的，自动测试覆盖不到这些行为，大改容易把修好的问题改回来。执行顺序为 M1 → M2 → M3 → M4 → M6；M5 不做整体拆分。
 
 每个里程碑拆成多条短期分支，分别走 PR 合入 `main`，不设长期 `refactor` 分支。
 
 | 里程碑 | 内容 | 建议分支 | 完成标准 |
 |---|---|---|---|
-| **M0 基线** | 本地跑通全部检查；按 7.1 实测一遍 0.2.0 并记录到 `docs/ACCEPTANCE.md` | `test/windows-acceptance` | 有 0.2.0 的实测记录，未测项已注明 |
+| **M0 基线** | 本地跑通全部检查；按 7.1 实测一遍 0.2.0。实测记录不进仓库 | 无 | 自动检查已完成（见第 11 节）；实机场景在其他电脑上继续测 |
 | **M1 工程护栏** | 一次性 `cargo fmt`（登记到 `.git-blame-ignore-revs`）；CI 加 fmt / clippy；实机测试改 `#[ignore]`；CI 改用 dev 配置并加缓存；版本一致性检查脚本；建 `docs/adr/`；修 ROADMAP；开分支保护 | `chore/rustfmt`、`chore/test-layers`、`chore/ci-speed`、`chore/version-check` | `cargo test` 不碰桌面且覆盖全部原有用例（数量不减）；CI 明显低于 22 分钟 |
 | **M2 接口冻结** | 为 13 个命令和 6 个事件写契约测试（字段名和形状）；为 `Settings` 写 JSON 快照测试 | `test/ipc-contract` | 改动接口会让 CI 失败 |
 | **M3 应用层拆分** | 拆 `main.rs` 到 `app/`、`settings/`、`window/`；提取 `SettingsStore::update`；把计数器收拢成有名字的类型 | `refactor/app-layer`、`refactor/settings-store`、`refactor/epochs` | `main.rs` 少于 50 行；设置更新只有一个入口；P-01、P-06、P-07 关闭 |
 | **M4 查询链路** | 提取 `lookup::service`；`watch` 替换轮询；词条类型化 | `refactor/lookup-service`、`refactor/typed-entry` | 夹具 JSON 无差异；取消和过期测试全过；P-08、P-09 关闭 |
-| **M5 取词层**（风险最高） | 按 `Backend` 模式逐个模块抽 trait，把决策移到 `core/`，每次只动一个模块，顺序为 `input` → `windows_text` → `windows` → `probe` → `windows_copy` | `refactor/capture-<模块>` | `core/` 无 Win32 依赖；每个 PR 都附 7.1 中相关项的实测结果；P-05 关闭 |
+| **M5 取词层**（按需，不做整体拆分） | 只在修具体问题时，顺手按 `Backend` 模式抽出相关的纯逻辑；一次只动一个模块 | `fix/…`，必要时 `refactor/capture-<模块>` | 每个 PR 都附 7.1 中相关项的实测结果；P-05 不作为 0.3.0 的发布条件 |
 | **M6 前端模块化** | 改 ES 模块；状态集中；以原生设置为唯一来源，localStorage 只用于浏览器预览；同步更新测试 | `refactor/ui-modules`、`refactor/ui-state` | 测试不再依赖 `vm` 拼接；P-10、P-11 关闭；截图对比无变化 |
-| **M7 发布** | 打标签触发的发布工作流（构建、校验、SHA256、草稿 Release）；发 0.3.0 预发布版试用，再转正式版 | `chore/release-workflow`、`chore/release-0.3.0` | 7.1 全部实测通过；从 0.2.0 升级后设置保留 |
+| **M7 发布** | 打标签触发的发布工作流（构建、校验、SHA256、草稿 Release）；发 0.3.0 预发布版试用，再转正式版 | `chore/release-workflow`、`chore/release-0.3.0` | 7.1 实测完成，未测项写明原因，R-06、R-07 必测；从 0.2.0 升级后设置保留 |
 
-**顺序依赖：** M0 → M1 → M2 → M3 → M4；M5、M6 依赖 M2，可并行，但不要同时改同一批文件；M7 最后。
+**顺序依赖：** M1 → M2 → M3 → M4；M6 依赖 M2；M5 随修复进行；M7 最后。7.2 节的改进在 M1 之后穿插进行。
+
+**M0 现状：** 自动检查已完成。浏览器、终端、PDF、托盘等场景需要人工测试，不阻塞后续开发，但要在 M7 发布前完成。
 
 ### 7.1 回归验收矩阵
 
@@ -208,6 +212,22 @@ shared/dictionary.ts      改成带 export 的模块，继续作为 JSON 校验�
 | R-13 | 托盘：双击、右键、关闭到托盘后重建主窗口 | 符合 FR-09 | 0.1.0 |
 | R-14 | 安装版、便携版；从 0.2.0 升级 | 正常运行，设置保留 | 0.1.0 |
 | R-15 | 断网、取消查询、快速连续查词 | 分类提示；旧结果不覆盖新词 | 0.1.0 |
+
+### 7.2 产品改进清单
+
+来自 2026-11-02 对 0.2.0 的一次实测（记事本、LibreOffice，由工具模拟操作）。
+
+| 编号 | 优先级 | 改进 | 依据 | 完成标准 | 建议分支 |
+|---|---|---|---|---|---|
+| I-01 | 高 | 浮窗不遮挡选中的单词，错误和空状态时缩小高度 | 选区下方放不下时，浮窗盖住了单词；空状态大半空白（`capture.rs:28-33`） | 屏幕各边缘选词都不盖住单词；空状态高度贴合内容；用户设定的尺寸仍保留 | `fix/popup-placement` |
+| I-02 | 中 | 被拦截时说明原因，并给出下一步（如在浏览器打开原词典） | 被拦时只提示“稍后再试”，重试也没用 | 拦截和网络失败的提示不同 | `fix/blocked-message` |
+| I-03 | 中 | 读取错误时回退到复制核对，先覆盖 LibreOffice，并确认不放宽密码框等保护 | LibreOffice 26.8 自动划词无反应，快捷键提示读不到文字，状态为 `read_error` | LibreOffice 能取词；受保护区域仍不读取；有回归测试 | `fix/capture-read-error` |
+| I-04 | 中 | 验证最小化窗口能否恢复，需要时修复 | 只是代码疑点，未实测（`main.rs:193`） | 最小化后双击托盘和再次启动都能恢复主窗口 | `fix/restore-minimized` |
+| I-05 | 中 | 处理 CI 从未运行的 9 个用例（P-02） | 用例清单对比 | 每个用例都有明确归属 | 并入 M1 的 `chore/test-layers` |
+| I-06 | 低 | 代码签名，减少 Windows 安全警告 | exe 未签名，再次启动时弹出过安全警告 | 比较证书成本后决定 | `chore/code-signing` |
+| I-07 | 待定 | 词典来源抽成接口，增加离线词库兜底 | 一个网络环境下，Cambridge 对所有请求要求人机验证（经代理也一样）；维护者在其他环境使用正常 | 先在其他电脑上确认影响范围，再决定是否做 | `feat/dictionary-source` |
+
+**边界：** 不做任何绕过人机验证的手段，包括伪装浏览器指纹、自动完成验证、借用 WebView 的验证状态。如果要做离线词库，先确认授权和体积，首选 ECDICT；长期依赖 Cambridge 的正路是申请正式授权（见 NOTICE 中的授权页面）。
 
 ## 8. Git 版本管理
 
@@ -244,7 +264,7 @@ main ─●───●───●────●── v0.3.0
 |---|---|
 | 纯文档、纯内部里程碑（未发布） | 不变 |
 | 发布前的回归修复 | `0.2.x` |
-| 重构全部完成 | `0.3.0`，先用 `--prerelease --latest=false` 试用，再转正式版 |
+| 工程整理和 7.2 节改进完成 | `0.3.0`，先用 `--prerelease --latest=false` 试用，再转正式版 |
 
 - `v0.2.0` 就是重构基线，不需要另打标签，随时可用 `git diff v0.2.0` 对比。
 - 只打 annotated tag，从已通过 CI 的 `main` 创建。
@@ -265,7 +285,8 @@ gh pr create --fill
 # 等 CI 通过并检查 diff，然后 squash 合并
 git switch main
 git pull --ff-only
-git branch -d refactor/settings-store
+git diff refactor/settings-store main   # squash 后 Git 认不出已合并，先确认没有差异
+git branch -D refactor/settings-store
 ```
 
 ### 8.5 分支保护（M1 启用）
@@ -278,7 +299,7 @@ git branch -d refactor/settings-store
 |---|---|---|
 | 取词时序因重构改变，自动测试发现不了 | 高 | M5 一次一个模块；保留时序常量；每个 PR 附实测 |
 | 破坏剪贴板恢复，影响用户数据 | 高 | `copy_policy` 的事务测试不动；R-06、R-07 必测 |
-| Cambridge 页面结构变化或访问策略调整 | 中 | 与重构无关但可能同时发生；用夹具把“解析回归”和“网站变化”分开 |
+| Cambridge 页面结构变化或访问策略调整 | 中 | 已在一个网络环境下被 Cloudflare 人机验证拦下，影响范围待确认（I-07）；用夹具把“解析回归”和“网站变化”分开 |
 | 大范围格式化干扰 blame 和进行中的分支 | 中 | M1 最先做，趁当前没有进行中的分支；登记 ignore-revs |
 | 单人项目的实机验证被跳过 | 中 | 分支保护管不到实测，靠 PR 模板如实填写，未测项明确写出 |
 
@@ -294,6 +315,6 @@ git branch -d refactor/settings-store
 | 检查 | 状态 |
 |---|---|
 | 远端 CI（`main` @ `9da0577`，运行 `39291291018`） | 通过，耗时 21 分 49 秒 |
-| 本地 `npm test` / `npm run check` / `npm run build` | 尚未运行，M0 执行 |
-| 本地 `windows-cargo.ps1 -Action test` 及过滤器 | 尚未运行，M0 执行 |
-| 实机验收矩阵 7.1 | 尚未运行，M0 执行 |
+| 本地 `npm test` / `npm run check` / `npm run build` | 通过，`npm test` 66 个 |
+| 本地 `windows-cargo.ps1 -Action test` 及 16 个过滤器 | 226 个用例中，通过 215 个，跳过 2 个，9 个未运行（P-02） |
+| 实机验收矩阵 7.1 | 部分完成，其余在其他电脑上继续测 |

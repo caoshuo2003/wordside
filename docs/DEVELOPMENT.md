@@ -1,6 +1,6 @@
 # 开发指南
 
-[架构](ARCHITECTURE.md) · [贡献与分支](../CONTRIBUTING.md) · [发布流程](RELEASING.md) · [产品开发文档（重构版）](PRODUCT-DEVELOPMENT.md)
+[架构](ARCHITECTURE.md) · [贡献与分支](../CONTRIBUTING.md) · [发布流程](RELEASING.md) · [产品开发文档](PRODUCT-DEVELOPMENT.md)
 
 ## 准备环境
 
