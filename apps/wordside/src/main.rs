@@ -1,10 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// The modules below have no callers until the card lands in the next commits.
-#![allow(dead_code)]
 
+mod app;
 mod cache;
+mod card;
+// Some backend diagnostics are only reached by the CLI entries added later in this milestone.
+#[allow(dead_code)]
 mod dictionary;
+mod entry;
 mod lookup;
+mod presentation;
+mod render;
 mod selection_input;
+mod service;
 
-fn main() {}
+fn main() -> windows::core::Result<()> {
+    app::run()
+}
