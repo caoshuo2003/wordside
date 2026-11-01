@@ -11,14 +11,14 @@
 
 ## 项目概况
 
-Windows x64 划词词典，Tauri 2 + Rust + TypeScript（无前端框架）。正在按[产品开发文档](docs/PRODUCT-DEVELOPMENT.md)重写为 0.3.0；新代码进 `apps/desktop/`，切换前 `desktop/` 保持可发布。
+Windows x64 划词词典。0.2.0 是 Tauri 2 + Rust + TypeScript；正在按[产品开发文档](docs/PRODUCT-DEVELOPMENT.md)重写为纯 Rust + Direct2D 的极简版本 0.3.0。新代码进 `apps/wordside/`，切换前 `desktop/` 保持可发布。
 
 | 位置 | 内容 |
 |---|---|
-| `desktop/src-tauri/src/capture/` | Windows 取词，风险最高 |
+| `desktop/src-tauri/src/capture/` | Windows 取词，风险最高，只拆结构 |
 | `desktop/src-tauri/src/dictionary/`、`lookup.rs` | 读取单词 API，原样保留 |
 | `desktop/src-tauri/src/main.rs` | 应用层，将重写 |
-| `desktop/src/`、`shared/` | 界面和 JSON 校验，将重写 |
+| `desktop/src/`、`shared/` | 界面将删除；JSON 校验移植到 Rust |
 | `modules/cambridge-dictionary-api/` | 上游 JS 解析器，只用于行为对照，不进发布包 |
 
 ## 常用命令
@@ -41,7 +41,8 @@ npm run build
 - **不绕过 Cambridge 的人机验证。** 不伪装指纹，不自动完成验证，不逐个换代理出口。
 - **不改应用标识** `local.wordside.dictionary.api-preview`，否则用户设置会丢失。
 - **读取单词 API 只搬不改。** 除路径和模块引用外不改逻辑，输出的 JSON 不变。
-- **不放宽** `open_source` 白名单和隐私边界：词条缓存只在内存；历史只存本机；诊断文件不含单词和剪贴板内容；句子只在用户点击后才发送；自动划词永远不发送句子。CSP 只为翻译接口增加最小范围。
+- **守住性能预算。** 不引入 WebView、前端框架或内置字体；超出产品开发文档 3.1 节的预算要说明原因。
+- **不放宽** 外部链接白名单和隐私边界：词条缓存只在内存；不保存查询记录；诊断文件不含单词和剪贴板内容。
 - **保留** Nongfsq / EliasChen 的署名和 MIT 许可。
 - **解析器变化** 要验证完整字段和顺序，不能静默丢内容。
 - **不提交** 依赖、编译缓存、Release 二进制、真实网页、选词内容或凭据。
@@ -50,7 +51,7 @@ npm run build
 
 - `main` 不直接提交。每项改动一条短期分支，走 PR，CI 通过后 squash 合并。
 - `refactor:` 不改行为；移动代码和修改逻辑分开提交；重构中发现的 bug 开 `fix/` 分支单独修。
-- 测试数量不能减少；PR 如实写明跑过什么、没测什么，模拟结果不能算实机通过。
+- 保留下来的模块测试数量不能减少；PR 如实写明跑过什么、没测什么，模拟结果不能算实机通过。
 - 取词层只拆结构，判断逻辑和时序不变；一个 PR 只动一个模块，并附实测结果。
 - 推送、创建 PR、合并、打标签、发布前都要先得到维护者同意。
 
