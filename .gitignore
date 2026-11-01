@@ -21,7 +21,7 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Local agent instructions and generated Tauri schemas are not product source.
-/AGENTS.md
+# Machine-specific agent notes and generated Tauri schemas are not product source.
+/AGENTS.local.md
 /WORK-STATUS.md
 desktop/src-tauri/gen/
