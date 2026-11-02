@@ -80,6 +80,37 @@ capture::probe::protocol_tests::
 
 过滤和跳过不算通过用例。真实选词、焦点、DPI、托盘与安装应单独验收，在 PR 或本地任务记录中注明实际覆盖与未验项。
 
+## 0.3.0 原生卡片（apps/wordside）
+
+独立的 Cargo 工程，不需要 Node（只有生成第三方许可时要用）。在 PowerShell 7 中：
+
+```powershell
+cargo fmt --manifest-path apps/wordside/Cargo.toml -- --check
+cargo clippy --manifest-path apps/wordside/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path apps/wordside/Cargo.toml
+node tools/build-licenses.mjs --crate apps/wordside
+cargo build --manifest-path apps/wordside/Cargo.toml --release
+.\tools\check-wordside.ps1 -Exe apps/wordside/target/release/wordside.exe -Runtime
+```
+
+- `cargo test` 不操作桌面、不连网，也不读写真实设置；有一个计时测试在机器很忙时偶尔失败，CI 会单独重试它。
+- 第三方许可要在正式编译前生成，否则 exe 里只有一行提示，`check-wordside.ps1` 会判为失败。
+- `check-wordside.ps1 -Runtime` 用临时设置目录启动程序，测托盘待命时的内存和空闲 CPU；不加 `-Runtime` 只做 CI 也能做的静态检查。
+- 编译时 `build.rs` 用 Windows SDK 的 `rc.exe` 嵌入图标；没有 SDK 也能编译，只是 exe 没有图标。改了 `src/icon.rs` 的图形后用 `wordside.exe --export-icon apps\wordside\assets\wordside.ico` 重新导出。
+
+开发时的启动参数（会直接显示卡片，也不参与单实例）：
+
+| 参数 | 作用 |
+|---|---|
+| `--payload <json>` | 显示保存的词条，如 `apps/wordside/dev/sample-run.json` |
+| `--parse <html>` | 解析保存的网页并显示 |
+| `--first-paint` | 打印启动到首次绘制的毫秒数后退出 |
+| `--stay` | 失去焦点时不自动隐藏 |
+| `--light`、`--dark`、`--opaque`、`--gpu` | 强制外观、关闭玻璃、改用 GPU 渲染 |
+| `--sound <file>` | 所有读音都播放这个本地文件，用于在访问不到 Cambridge 的电脑上测发音 |
+
+正常启动（不带参数）只在托盘待命，读写真实设置。
+
 ## 解析对照与诊断
 
 原始 Nongfsq 解析器在 `modules/cambridge-dictionary-api/tests/upstream/` 按原文保留；桌面 Rust 使用合成夹具对照完整 JSON。
@@ -120,6 +151,7 @@ npm test
 
 - Linux：锁文件安装、JS 测试、TypeScript 与 UI 构建。
 - Windows：同样检查，另外执行原生逻辑、纯快捷键解析及上述取词事务检查。
+- Windows（apps/wordside）：格式、clippy、测试、生成第三方许可、正式编译、`check-wordside.ps1` 发布自检；依赖和编译结果有缓存。
 
 CI 覆盖源码与自动化检查；真实桌面、安装和发布各自单独执行并记录。远端检查状态以 GitHub Actions 的实际结果为准。
 
