@@ -256,6 +256,23 @@ fn retry_allowed(selection: &Selection, input_attempted: bool) -> bool {
                 | Selection::ReadError(_)
         )
 }
+// When the clipboard could not be borrowed and nothing was typed or copied, it is
+// exactly as it was. Rather than no lookup at all, use the word UI Automation already
+// read (browsers, Word); it only lacks the copy's confirmation.
+fn unverified_word(
+    outcome: &Option<Selection>,
+    provided: &Option<Selection>,
+    input_attempted: bool,
+) -> Option<Selection> {
+    match (outcome, provided) {
+        (Some(Selection::ClipboardUnavailable), Some(word @ Selection::Word(_)))
+            if !input_attempted =>
+        {
+            Some(word.clone())
+        }
+        _ => None,
+    }
+}
 // Resolve read-only provider paths before a single optional copy transaction.
 fn read_provider(
     request: &ProbeRequest,
@@ -480,6 +497,7 @@ impl Worker {
                     helper = None;
                 }
                 report.provider = super::diagnostics::code(outcome.as_ref());
+                let provided = outcome.clone();
                 if work_item.verify
                     && !native_verified
                     && outcome
@@ -619,8 +637,14 @@ impl Worker {
                         {
                             backup_helper = None;
                         }
-                        failure.map(|_| Selection::ClipboardUnavailable)
+                        // A backup that ran out of time leaves a current request as
+                        // unanswered as a refused one; only a superseded one is silent.
+                        (failure.is_some() || valid()).then_some(Selection::ClipboardUnavailable)
                     };
+                    if let Some(word) = unverified_word(&outcome, &provided, input_attempted) {
+                        report.unverified = true;
+                        outcome = Some(word);
+                    }
                 }
                 report.request_current = Some(current.load(Ordering::SeqCst) == request.serial);
                 report.input_current = Some(work_item.guard.as_ref().is_none_or(
@@ -1509,6 +1533,35 @@ mod protocol_tests {
             Selection::CopyUnavailable,
         ] {
             assert!(!retry_allowed(&selection, false));
+        }
+    }
+    #[test]
+    fn unborrowable_clipboard_falls_back_to_the_read_word_only_when_untouched() {
+        let word = Some(Selection::Word("record".into()));
+        let unavailable = Some(Selection::ClipboardUnavailable);
+        assert_eq!(
+            unverified_word(&unavailable, &word, false),
+            Some(Selection::Word("record".into()))
+        );
+        // Once a copy key was sent the clipboard was borrowed; its result stands.
+        assert_eq!(unverified_word(&unavailable, &word, true), None);
+        // Nothing to fall back to: the provider had no word.
+        for provided in [
+            Some(Selection::Unsupported),
+            Some(Selection::Unreported),
+            None,
+        ] {
+            assert_eq!(unverified_word(&unavailable, &provided, false), None);
+        }
+        // Any other outcome is the copy's own answer (or a cancellation).
+        for outcome in [
+            Some(Selection::CopyUnavailable),
+            Some(Selection::ClipboardRestoreFailed),
+            Some(Selection::InvalidWord),
+            Some(Selection::Word("recorded".into())),
+            None,
+        ] {
+            assert_eq!(unverified_word(&outcome, &word, false), None);
         }
     }
     #[test]

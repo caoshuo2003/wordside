@@ -34,6 +34,10 @@ pub struct FailureReport {
     pub copy: Option<CopyDiagnostics>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub copy_read: Option<super::windows_copy::ReadDiagnostics>,
+    /// A word was used without the copy's check because the clipboard could not be
+    /// borrowed. Recorded (without the word) so the reason stays visible.
+    #[serde(skip)]
+    pub unverified: bool,
 }
 pub fn code(selection: Option<&Selection>) -> &'static str {
     selection
@@ -58,6 +62,7 @@ impl FailureReport {
             backup: None,
             copy: None,
             copy_read: None,
+            unverified: false,
         }
     }
     pub fn finish(
@@ -66,10 +71,16 @@ impl FailureReport {
         outcome: Option<&Selection>,
         started: Instant,
     ) {
-        if matches!(outcome, Some(Selection::Word(_))) {
+        // A superseded request (the first click of a double-click, say) tells nothing
+        // and must not overwrite the last real failure.
+        if outcome.is_none() || matches!(outcome, Some(Selection::Word(_))) && !self.unverified {
             return;
         }
-        self.outcome = code(outcome);
+        self.outcome = if self.unverified {
+            "word_unverified"
+        } else {
+            code(outcome)
+        };
         self.elapsed_ms = started.elapsed().as_millis();
         recorder.save(&self);
     }
@@ -123,11 +134,28 @@ mod tests {
             "successful words never create a query history"
         );
         FailureReport::new().finish(&recorder, Some(&Selection::Timeout), Instant::now());
-        let saved = std::fs::read_to_string(path).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
         assert!(saved.contains("timeout"));
         assert!(
             !saved.contains("read_error"),
             "only one failure is retained"
         );
+        FailureReport::new().finish(&recorder, None, Instant::now());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            saved,
+            "a superseded request keeps the last real failure"
+        );
+        let mut report = FailureReport::new();
+        report.phase = Phase::Backup;
+        report.unverified = true;
+        report.finish(
+            &recorder,
+            Some(&Selection::Word("THIRD_PRIVATE_WORD".into())),
+            Instant::now(),
+        );
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("word_unverified") && saved.contains("backup"));
+        assert!(!saved.contains("PRIVATE_") && !saved.contains("unverified\":"));
     }
 }
