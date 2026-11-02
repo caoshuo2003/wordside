@@ -1,6 +1,7 @@
 //! Materialize OLE payloads before copying. No old IDataObject survives this call.
 //! Restore uses Win32 static formats under the existing sequence/owner lock;
 //! Windows supplies a fresh default OLE wrapper rather than stale provider handles.
+//! Streams, storage and metafiles are taken from OLE's own Win32 rendering of them.
 use super::*;
 use ::windows::{
     core::Error,
@@ -43,21 +44,54 @@ fn medium_for(id: u32) -> u32 {
         1
     }
 }
+// Streams (4), storage (8), metafile pictures (32) and enhanced metafiles (64) have
+// no handle to ask OLE for. OLE itself renders every static format onto the Win32
+// clipboard, storage as a compound file in global memory: the same copy that stays
+// when the source application exits. Those are backed up from there, and on restore
+// the default OLE wrapper offers the compound file as storage again. FileContents is
+// one stream per file under a single name and its Win32 rendering holds only the
+// first, so it never qualifies.
+const RENDERED_MEDIA: u32 = 4 | 8 | 32 | 64;
+fn rendered_natively(format: &FORMATETC) -> bool {
+    let id = u32::from(format.cfFormat);
+    (matches!(id, 3 | 14)
+        || format.tymed & medium_for(id) == 0 && format.tymed & RENDERED_MEDIA != 0)
+        && !file_contents_view(id)
+}
 // Every declared representation must have a lossless static Win32 equivalent.
-// Indexed/virtual files, streams, storage and target-specific objects fail before input.
+// Indexed/virtual files and target-specific objects fail before input.
 fn static_format(format: &FORMATETC) -> bool {
     format.ptd.is_null()
         && format.dwAspect == 1
         && format.lindex == -1
         && format.cfFormat != 0
-        && format.tymed & medium_for(u32::from(format.cfFormat)) != 0
+        && (format.tymed & medium_for(u32::from(format.cfFormat)) != 0 || rendered_natively(format))
+}
+// Some sources (.NET WinForms among them) declare a metafile they cannot draw: OLE
+// reports no such medium and the Win32 clipboard has no data, so no application can
+// paste it. Only that answer, for a metafile, makes a declared format count as empty.
+fn undeliverable(error: &Error) -> bool {
+    matches!(
+        error.code().0 as u32,
+        // DV_E_FORMATETC, DV_E_TYMED, DV_E_CLIPFORMAT, and CLIPBRD_E_BAD_DATA: the
+        // Win32 rendering came back empty.
+        0x8004_0064 | 0x8004_0069 | 0x8004_006a | 0x8004_01d3
+    )
+}
+pub(super) struct Snapshot {
+    /// Payloads read through OLE.
+    pub saved: Vec<Format>,
+    /// Formats OLE has rendered onto the Win32 clipboard, where they must be read.
+    pub rendered: Vec<u32>,
+    /// Declared metafiles that hold nothing (see `undeliverable`).
+    pub empty: Vec<u32>,
 }
 pub(super) fn snapshot(
     sequence: u32,
     owner: Handle,
     paths: bool,
     bytes: &mut usize,
-) -> Result<Vec<Format>, BackupFailure> {
+) -> Result<Snapshot, BackupFailure> {
     unsafe {
         OleInitialize(None).map_err(|error| com_error(BackupStage::OleInitialize, None, error))?;
         let _apartment = Apartment;
@@ -73,7 +107,7 @@ fn materialize(
     paths: bool,
     bytes: &mut usize,
     current: impl Fn() -> bool,
-) -> Result<Vec<Format>, BackupFailure> {
+) -> Result<Snapshot, BackupFailure> {
     unsafe {
         if !current() {
             return Err(failure(BackupStage::SourceChanged, None, false));
@@ -82,6 +116,8 @@ fn materialize(
             .EnumFormatEtc(1)
             .map_err(|error| com_error(BackupStage::OleEnumerate, None, error))?;
         let mut saved: Vec<Format> = Vec::new();
+        let mut rendered: Vec<u32> = Vec::new();
+        let mut empty: Vec<u32> = Vec::new();
         loop {
             let mut format = FORMATETC::default();
             let mut fetched = 0;
@@ -110,15 +146,36 @@ fn materialize(
                 continue;
             }
             // Never merge distinct FORMATETC payloads with one format identifier.
-            if fetched != 1 || !plain || ole_transport(id) || saved.iter().any(|item| item.id == id)
+            if fetched != 1
+                || !plain
+                || ole_transport(id)
+                || saved.iter().any(|item| item.id == id)
+                || rendered.contains(&id)
+                || empty.contains(&id)
             {
                 return Err(failure(BackupStage::UnsupportedFormat, Some(id), false));
             }
-            if saved.len() >= MAX_FORMATS {
+            if saved.len() + rendered.len() >= MAX_FORMATS {
                 return Err(failure(BackupStage::FormatLimit, None, false));
             }
             if !current() {
                 return Err(failure(BackupStage::SourceChanged, None, false));
+            }
+            if rendered_natively(&format) {
+                // Metafiles are small and the only kind seen declared empty; ask once.
+                if matches!(id, 3 | 14) {
+                    format.tymed = if id == 3 { 32 } else { 64 };
+                    match object.GetData(&format) {
+                        Ok(medium) => drop(Medium(medium)),
+                        Err(error) if undeliverable(&error) => {
+                            empty.push(id);
+                            continue;
+                        }
+                        Err(error) => return Err(com_error(BackupStage::OleRead, Some(id), error)),
+                    }
+                }
+                rendered.push(id);
+                continue;
             }
             format.tymed = medium_for(id);
             let medium = Medium(
@@ -139,13 +196,17 @@ fn materialize(
                 return Err(failure(BackupStage::SourceChanged, None, false));
             }
         }
-        if saved.is_empty() {
+        if saved.is_empty() && rendered.is_empty() {
             return Err(failure(BackupStage::OleEnumerate, None, false));
         }
         if !current() {
             return Err(failure(BackupStage::SourceChanged, None, false));
         }
-        Ok(saved)
+        Ok(Snapshot {
+            saved,
+            rendered,
+            empty,
+        })
     }
 }
 

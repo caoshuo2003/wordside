@@ -79,6 +79,8 @@ extern "system" {
     fn GetObjectW(object: Handle, size: i32, buffer: *mut c_void) -> i32;
     fn GetBitmapBits(bitmap: Handle, size: i32, bits: *mut c_void) -> i32;
     fn GetPaletteEntries(palette: Handle, start: u32, count: u32, entries: *mut c_void) -> u32;
+    fn GetEnhMetaFileBits(metafile: Handle, size: u32, bits: *mut u8) -> u32;
+    fn GetMetaFileBitsEx(metafile: Handle, size: u32, bits: *mut c_void) -> u32;
 }
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -467,6 +469,14 @@ fn enumerate_formats() -> Result<Vec<u32>, BackupFailure> {
         ids.push(id);
     }
 }
+// Windows synthesizes each metafile format from the other.
+fn metafile_twin(id: u32) -> Option<u32> {
+    match id {
+        3 => Some(14),
+        14 => Some(3),
+        _ => None,
+    }
+}
 #[path = "windows_ole.rs"]
 mod ole;
 fn snapshot_format(id: u32, source: Handle, bytes: &mut usize) -> Result<Format, BackupFailure> {
@@ -533,9 +543,39 @@ fn snapshot_format(id: u32, source: Handle, bytes: &mut usize) -> Result<Format,
             if *bytes > MAX_BYTES {
                 return Err(limit());
             }
-        } else if matches!(id, 3 | 14 | 0x83 | 0x8e) {
-            // These uncommon GDI formats cannot currently be budgeted safely.
-            return Err(unsupported());
+        } else if matches!(id, 14 | 0x8e) {
+            SetLastError(0);
+            let size = GetEnhMetaFileBits(source, 0, ptr::null_mut()) as usize;
+            if size == 0 {
+                return Err(inspect());
+            }
+            *bytes = bytes.checked_add(size).ok_or_else(limit)?;
+            if *bytes > MAX_BYTES {
+                return Err(limit());
+            }
+        } else if matches!(id, 3 | 0x83) {
+            // A METAFILEPICT header in global memory that owns a Windows metafile.
+            SetLastError(0);
+            if GlobalSize(source) < std::mem::size_of::<MetaFilePicture>() {
+                return Err(inspect());
+            }
+            let picture = GlobalLock(source) as *const MetaFilePicture;
+            if picture.is_null() {
+                return Err(inspect());
+            }
+            let metafile = (*picture).metafile;
+            GlobalUnlock(source);
+            let size = GetMetaFileBitsEx(metafile, 0, ptr::null_mut()) as usize;
+            if size == 0 {
+                return Err(inspect());
+            }
+            let size = size
+                .checked_add(std::mem::size_of::<MetaFilePicture>())
+                .ok_or_else(limit)?;
+            *bytes = bytes.checked_add(size).ok_or_else(limit)?;
+            if *bytes > MAX_BYTES {
+                return Err(limit());
+            }
         } else {
             SetLastError(0);
             let size = GlobalSize(source);
@@ -549,7 +589,10 @@ fn snapshot_format(id: u32, source: Handle, bytes: &mut usize) -> Result<Format,
         }
         SetLastError(0);
         let data = match id {
+            // Display variants hold the same handle types as their ordinary formats.
             0x82 => OleDuplicateData(source, 2, 2),
+            0x83 => OleDuplicateData(source, 3, 2),
+            0x8e => OleDuplicateData(source, 14, 2),
             _ => OleDuplicateData(source, id as u16, 2),
         };
         if data == 0 {
@@ -740,17 +783,23 @@ impl Backup {
             let paths = ids.contains(&CF_HDROP);
             let mut bytes = 0;
             let mut ole_formats = 0;
+            let mut empty: Vec<u32> = Vec::new();
             let mut formats = if force_ole || ids.iter().copied().any(ole_transport) {
                 drop(lock); // OLE must open the clipboard itself, never under our lock.
-                let saved = ole::snapshot(before, original_owner, paths, &mut bytes)?;
+                let snapshot = ole::snapshot(before, original_owner, paths, &mut bytes)?;
                 lock = ClipboardLock::open(owner.0, Duration::from_millis(80))
                     .ok_or_else(|| failure(BackupStage::OpenClipboard, None, true))?;
                 if !ole::unchanged(before, original_owner) {
                     return Err(failure(BackupStage::SourceChanged, None, false));
                 }
                 ids = enumerate_formats()?;
-                ole_formats = saved.len();
-                saved
+                // The loop below reads these; one OLE did not render has no other copy.
+                if let Some(&id) = snapshot.rendered.iter().find(|id| !ids.contains(id)) {
+                    return Err(failure(BackupStage::UnsupportedFormat, Some(id), false));
+                }
+                ole_formats = snapshot.saved.len() + snapshot.rendered.len();
+                empty = snapshot.empty;
+                snapshot.saved
             } else {
                 Vec::new()
             };
@@ -765,6 +814,15 @@ impl Backup {
                     SetLastError(0);
                 }
                 let source = unsafe { GetClipboardData(id) };
+                // An empty declared metafile, or the twin Windows makes from it, has
+                // nothing any application could paste; leaving it out loses nothing.
+                if source == 0
+                    && empty
+                        .iter()
+                        .any(|&declared| declared == id || metafile_twin(declared) == Some(id))
+                {
+                    continue;
+                }
                 let value = if let Some(index) = formats.iter().position(|format| format.id == id) {
                     native_payload(formats.remove(index), source, &mut bytes)?
                 } else {
@@ -1878,6 +1936,93 @@ mod tests {
             );
             assert_eq!(entries, [10, 20, 30, 0, 50, 60, 70, 0]);
             assert!(snapshot_format(9, copy.data, &mut { MAX_BYTES }).is_err());
+        }
+    }
+    #[test]
+    fn metafiles_from_office_and_drawing_apps_are_cloned_with_a_budget() {
+        unsafe {
+            #[link(name = "gdi32")]
+            extern "system" {
+                fn CreateEnhMetaFileW(
+                    dc: Handle,
+                    file: *const u16,
+                    rect: *const c_void,
+                    text: *const u16,
+                ) -> Handle;
+                fn CloseEnhMetaFile(dc: Handle) -> Handle;
+                fn CreateMetaFileW(file: *const u16) -> Handle;
+                fn CloseMetaFile(dc: Handle) -> Handle;
+                fn Rectangle(dc: Handle, left: i32, top: i32, right: i32, bottom: i32) -> i32;
+            }
+            let dc = CreateEnhMetaFileW(0, ptr::null(), ptr::null(), ptr::null());
+            Rectangle(dc, 1, 1, 20, 20);
+            let original = Format {
+                id: 14,
+                data: CloseEnhMetaFile(dc),
+                bytes: 0,
+            };
+            assert_ne!(original.data, 0);
+            let size = GetEnhMetaFileBits(original.data, 0, ptr::null_mut()) as usize;
+            let mut expected = vec![0u8; size];
+            GetEnhMetaFileBits(original.data, size as u32, expected.as_mut_ptr());
+            let mut budget = 0;
+            let copy = snapshot_format(14, original.data, &mut budget).unwrap();
+            assert_eq!(budget, size);
+            drop(original);
+            let mut copied = vec![0u8; size];
+            assert_eq!(
+                GetEnhMetaFileBits(copy.data, size as u32, copied.as_mut_ptr()) as usize,
+                size
+            );
+            assert_eq!(copied, expected);
+            assert!(snapshot_format(14, copy.data, &mut { MAX_BYTES }).is_err());
+
+            let dc = CreateMetaFileW(ptr::null());
+            Rectangle(dc, 1, 1, 30, 30);
+            let metafile = CloseMetaFile(dc);
+            let header = std::mem::size_of::<MetaFilePicture>();
+            let original = Format {
+                id: 3,
+                data: GlobalAlloc(2, header),
+                bytes: 0,
+            };
+            (GlobalLock(original.data) as *mut MetaFilePicture).write(MetaFilePicture {
+                mode: 8,
+                x: 100,
+                y: 100,
+                metafile,
+            });
+            GlobalUnlock(original.data);
+            let size = GetMetaFileBitsEx(metafile, 0, ptr::null_mut()) as usize;
+            let mut expected = vec![0u8; size];
+            GetMetaFileBitsEx(metafile, size as u32, expected.as_mut_ptr() as _);
+            let mut budget = 0;
+            let copy = snapshot_format(3, original.data, &mut budget).unwrap();
+            assert_eq!(budget, size + header);
+            drop(original); // Frees the header and the original metafile.
+            let picture = GlobalLock(copy.data) as *const MetaFilePicture;
+            let (mode, x, y, cloned) = (
+                (*picture).mode,
+                (*picture).x,
+                (*picture).y,
+                (*picture).metafile,
+            );
+            GlobalUnlock(copy.data);
+            assert_eq!((mode, x, y), (8, 100, 100));
+            assert_ne!(cloned, metafile);
+            let mut copied = vec![0u8; size];
+            assert_eq!(
+                GetMetaFileBitsEx(cloned, size as u32, copied.as_mut_ptr() as _) as usize,
+                size
+            );
+            assert_eq!(copied, expected);
+            // A header too short to hold a picture is refused, not read past. (Owned as
+            // plain memory here so dropping it doesn't read the missing handle either.)
+            let short = buffer(13, &[0, 0]);
+            assert_eq!(
+                snapshot_format(3, short.data, &mut 0).err().unwrap().stage,
+                BackupStage::InspectFormat
+            );
         }
     }
     #[test]

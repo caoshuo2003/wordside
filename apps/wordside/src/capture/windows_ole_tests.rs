@@ -13,6 +13,30 @@ extern "system" {
 extern "system" {
     fn RegisterClipboardFormatW(name: *const u16) -> u32;
 }
+#[link(name = "gdi32")]
+extern "system" {
+    fn SetEnhMetaFileBits(size: u32, bits: *const u8) -> Handle;
+    fn CreateEnhMetaFileW(
+        dc: Handle,
+        file: *const u16,
+        rect: *const c_void,
+        text: *const u16,
+    ) -> Handle;
+    fn CloseEnhMetaFile(dc: Handle) -> Handle;
+    fn Rectangle(dc: Handle, left: i32, top: i32, right: i32, bottom: i32) -> i32;
+}
+fn metafile_bits() -> Vec<u8> {
+    unsafe {
+        let dc = CreateEnhMetaFileW(0, ptr::null(), ptr::null(), ptr::null());
+        Rectangle(dc, 1, 1, 20, 20);
+        let metafile = CloseEnhMetaFile(dc);
+        let size = GetEnhMetaFileBits(metafile, 0, ptr::null_mut());
+        let mut bits = vec![0u8; size as usize];
+        GetEnhMetaFileBits(metafile, size, bits.as_mut_ptr());
+        DeleteEnhMetaFile(metafile);
+        bits
+    }
+}
 #[link(name = "shell32")]
 extern "system" {
     fn SHCreateStdEnumFmtEtc(
@@ -76,6 +100,22 @@ unsafe extern "system" fn get(
     else {
         return HRESULT(0x80040064u32 as i32);
     };
+    // An enhanced metafile is drawn from its stored bits, "fail" is a source error,
+    // and no bits means a metafile the source declares but cannot draw.
+    if (*format).tymed == 64 && !bytes.is_empty() {
+        if bytes == b"fail" {
+            return HRESULT(0x80004005u32 as i32);
+        }
+        let metafile = SetEnhMetaFileBits(bytes.len() as u32, bytes.as_ptr());
+        out.write(STGMEDIUM {
+            tymed: 64,
+            u: ::windows::Win32::System::Com::STGMEDIUM_0 {
+                hEnhMetaFile: ::windows::Win32::Graphics::Gdi::HENHMETAFILE(metafile as _),
+            },
+            ..Default::default()
+        });
+        return HRESULT(0);
+    }
     if (*format).tymed != 1 {
         return HRESULT(0x80040069u32 as i32);
     }
@@ -214,17 +254,101 @@ fn ole_text_and_private_payloads_are_independent_after_provider_is_destroyed() {
         (format(13), text.clone()),
         (format(id), private.clone()),
     ]);
-    let saved = materialize(&source, false, &mut 0, || true).unwrap();
+    let snapshot = materialize(&source, false, &mut 0, || true).unwrap();
     drop(source);
+    assert!(snapshot.rendered.is_empty() && snapshot.empty.is_empty());
+    let saved = snapshot.saved;
     assert_eq!(saved.len(), 2);
     assert_eq!(saved_bytes(&saved[0], text.len()), text);
     assert_eq!(saved_bytes(&saved[1], private.len()), private);
 }
 #[test]
-fn stream_only_indexed_target_specific_and_conflicting_formats_refuse_before_copy() {
+fn stream_storage_and_metafiles_are_read_from_the_win32_rendering_not_refused() {
+    let id = custom("Embed Source");
+    let source = provider(vec![
+        (format(13), vec![0, 0]),
+        (
+            FORMATETC {
+                tymed: 8,
+                ..format(id)
+            },
+            vec![],
+        ),
+        (
+            FORMATETC {
+                tymed: 4,
+                ..format(1)
+            },
+            vec![],
+        ),
+        (
+            FORMATETC {
+                tymed: 64,
+                ..format(14)
+            },
+            metafile_bits(),
+        ),
+    ]);
+    let snapshot = materialize(&source, false, &mut 0, || true).unwrap();
+    let ids: Vec<_> = snapshot.saved.iter().map(|value| value.id).collect();
+    assert_eq!(ids, [13]);
+    assert_eq!(snapshot.rendered, [u32::from(id), 1, 14]);
+    assert!(snapshot.empty.is_empty());
+    // As on a tester's PC: a metafile picture declared (also as global memory) that
+    // the source cannot draw. Nothing can paste it, so it is noted, not refused.
+    let source = provider(vec![
+        (format(13), vec![0, 0]),
+        (
+            FORMATETC {
+                tymed: 1 | 32,
+                ..format(3)
+            },
+            vec![],
+        ),
+        (
+            FORMATETC {
+                tymed: 64,
+                ..format(14)
+            },
+            vec![],
+        ),
+    ]);
+    let snapshot = materialize(&source, false, &mut 0, || true).unwrap();
+    assert!(snapshot.rendered.is_empty());
+    assert_eq!(snapshot.empty, [3, 14]);
+    assert!(undeliverable(&Error::from_hresult(HRESULT(
+        0x800401d3u32 as i32
+    ))));
+    // Any other failure may be passing, so the backup is refused as before.
+    let source = provider(vec![(
+        FORMATETC {
+            tymed: 64,
+            ..format(14)
+        },
+        b"fail".to_vec(),
+    )]);
+    let error = materialize(&source, false, &mut 0, || true).err().unwrap();
+    assert_eq!(
+        (error.stage, error.format_id),
+        (BackupStage::OleRead, Some(14))
+    );
+    // Only these representations: an unknown medium still has no Win32 copy.
+    let source = provider(vec![(
+        FORMATETC {
+            tymed: 128,
+            ..format(1)
+        },
+        vec![],
+    )]);
+    let error = materialize(&source, false, &mut 0, || true).err().unwrap();
+    assert_eq!(error.stage, BackupStage::UnsupportedFormat);
+}
+#[test]
+fn indexed_target_specific_and_conflicting_formats_refuse_before_copy() {
     let ordinary = (format(13), vec![0, 0]);
     for invalid in [
         FORMATETC {
+            lindex: 0,
             tymed: 4,
             ..format(1)
         },
@@ -242,6 +366,19 @@ fn stream_only_indexed_target_specific_and_conflicting_formats_refuse_before_cop
         assert_eq!(error.stage, BackupStage::UnsupportedFormat);
     }
     let source = provider(vec![ordinary.clone(), ordinary]);
+    assert_eq!(
+        materialize(&source, false, &mut 0, || true)
+            .err()
+            .unwrap()
+            .stage,
+        BackupStage::UnsupportedFormat
+    );
+    // Two declarations of one rendered format are just as ambiguous.
+    let stream = FORMATETC {
+        tymed: 4,
+        ..format(1)
+    };
+    let source = provider(vec![(stream, vec![]), (stream, vec![])]);
     assert_eq!(
         materialize(&source, false, &mut 0, || true)
             .err()
@@ -299,7 +436,7 @@ fn copied_files_on_disk_keep_their_paths_without_the_virtual_contents_view() {
         contents.clone(),
         names.clone(),
     ]);
-    let saved = materialize(&source, true, &mut 0, || true).unwrap();
+    let saved = materialize(&source, true, &mut 0, || true).unwrap().saved;
     assert_eq!(
         saved.iter().map(|value| value.id).collect::<Vec<_>>(),
         [15, u32::from(names.0.cfFormat)],
