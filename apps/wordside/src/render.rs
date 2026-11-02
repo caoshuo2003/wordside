@@ -139,6 +139,7 @@ pub enum Action {
     Open(String),
     Sound(usize),
     OpenSettings,
+    Licenses,
     /// A click on a settings row: select it, then make the change.
     Settings(usize, SettingsChange),
 }
@@ -688,6 +689,20 @@ pub fn build_settings(
         WIDTH - PAD * 2.0,
         style(12.5, false, Ink::Muted),
     )?;
+    y += h + 4.0;
+    let (w, h) = b.text(
+        Zone::Body,
+        "第三方许可",
+        PAD,
+        y,
+        200.0,
+        style(12.5, false, Ink::Accent),
+    )?;
+    b.hit(
+        Zone::Body,
+        rect(PAD - 4.0, y - 3.0, w + 8.0, h + 6.0),
+        Action::Licenses,
+    );
     y += h + 12.0;
 
     b.frame.has_foot = true;

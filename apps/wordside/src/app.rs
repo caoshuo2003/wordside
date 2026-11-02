@@ -542,6 +542,7 @@ impl App {
         match action {
             Action::Sound(index) => self.toggle_sound(index),
             Action::OpenSettings => self.open_settings(),
+            Action::Licenses => open_licenses(),
             Action::Settings(row, change) => {
                 if let Some(page) = &mut self.page {
                     // A click elsewhere while recording leaves the old shortcut in place.
@@ -912,6 +913,24 @@ impl App {
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_SHOW);
             let _ = SetForegroundWindow(self.hwnd);
+        }
+    }
+}
+
+/// Shows the third-party notices in the default text editor. They are too long for the
+/// card, so they go to a file in the temporary folder, rewritten each time.
+fn open_licenses() {
+    let path = std::env::temp_dir().join("WordSide-THIRD-PARTY-LICENSES.txt");
+    if std::fs::write(&path, crate::cli::LICENSES).is_ok() {
+        unsafe {
+            ShellExecuteW(
+                None,
+                w!("open"),
+                &HSTRING::from(path.as_os_str()),
+                None,
+                None,
+                SW_SHOWNORMAL,
+            );
         }
     }
 }
