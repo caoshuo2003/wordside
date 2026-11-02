@@ -69,6 +69,10 @@ pub struct Theme {
     warn: u32,
     row: Rgba,
     line: Rgba,
+    /// The selected row's raised tile, its highlight edge and the shadow under it.
+    raised: Rgba,
+    edge: Rgba,
+    shadow: Rgba,
 }
 
 pub const DARK: Theme = Theme {
@@ -81,6 +85,9 @@ pub const DARK: Theme = Theme {
     warn: 0xffc48a,
     row: Rgba(0xffffff, 0.11),
     line: Rgba(0xffffff, 0.14),
+    raised: Rgba(0xffffff, 0.10),
+    edge: Rgba(0xffffff, 0.18),
+    shadow: Rgba(0x000000, 0.16),
 };
 pub const LIGHT: Theme = Theme {
     fill: 0xfafbfc,
@@ -92,6 +99,9 @@ pub const LIGHT: Theme = Theme {
     warn: 0x8a3d00,
     row: Rgba(0x000000, 0.07),
     line: Rgba(0x000000, 0.11),
+    raised: Rgba(0xffffff, 0.72),
+    edge: Rgba(0xffffff, 0.95),
+    shadow: Rgba(0x14233c, 0.05),
 };
 
 #[derive(Clone, Copy)]
@@ -104,12 +114,14 @@ enum Ink {
     Warn,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum Fill {
     Row,
     Accent,
     Muted,
     OnAccent,
+    Raised,
+    Shadow,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -413,6 +425,32 @@ impl Builder<'_> {
             self.hit(Zone::Head, rect(x, y, width, 28.0), Action::Sound(index));
         }
         Ok(width)
+    }
+
+    /// A raised tile: a soft shadow stepping out below, then a lighter fill with a thin
+    /// highlight edge. Inserted at `at` so it sits under shapes already added for the row.
+    fn raise(&mut self, zone: Zone, r: D2D_RECT_F, radius: f32, at: usize) {
+        let mut tile = Vec::new();
+        for (grow, drop) in [(2.5, 4.0), (1.0, 2.0), (0.0, 1.0)] {
+            tile.push(Shape {
+                rect: rect(
+                    r.left - grow,
+                    r.top - grow + drop,
+                    r.right - r.left + grow * 2.0,
+                    r.bottom - r.top + grow * 2.0,
+                ),
+                radius: radius + grow,
+                fill: Fill::Shadow,
+                zone,
+            });
+        }
+        tile.push(Shape {
+            rect: r,
+            radius,
+            fill: Fill::Raised,
+            zone,
+        });
+        self.frame.shapes.splice(at..at, tile);
     }
 
     fn shape(&mut self, zone: Zone, rect: D2D_RECT_F, radius: f32, fill: Fill) {
@@ -932,31 +970,49 @@ pub fn build(
             let tw = WIDTH - PAD - tx;
             for (index, definition) in view.visible().into_iter().enumerate() {
                 let top = y;
+                let shapes = b.frame.shapes.len();
                 y += 8.0;
-                // First line: the translation (or the English-only tag) left, source and
-                // example count right.
-                let meta = [
-                    (!definition.source.is_empty()).then(|| source_label(&definition.source)),
-                    (!definition.examples.is_empty())
-                        .then(|| format!("例句 {}", definition.examples.len())),
-                ]
-                .into_iter()
-                .flatten()
-                .collect::<Vec<_>>()
-                .join(" · ");
-                let meta_piece = b.frame.pieces.len();
-                let (meta_w, meta_h) = if meta.is_empty() {
-                    (0.0, 0.0)
-                } else {
-                    b.text(
+                // First line: the translation (or the English-only tag) left; the source and,
+                // when there are examples, an accent "例句 N" with an arrow on the right, so
+                // a row that opens shows it.
+                let open = view.expanded == Some(index);
+                let meta_pieces = b.frame.pieces.len();
+                let mut meta: Vec<(f32, f32)> = Vec::new();
+                if !definition.source.is_empty() {
+                    let label = if definition.examples.is_empty() {
+                        source_label(&definition.source)
+                    } else {
+                        format!("{} · ", source_label(&definition.source))
+                    };
+                    meta.push(b.text(
                         Zone::Body,
-                        &meta,
+                        &label,
                         0.0,
                         0.0,
                         tw,
                         style(12.5, false, Ink::Muted),
-                    )?
+                    )?);
+                }
+                if !definition.examples.is_empty() {
+                    let count = format!("例句 {}", definition.examples.len());
+                    meta.push(b.text(
+                        Zone::Body,
+                        &count,
+                        0.0,
+                        0.0,
+                        tw,
+                        style(12.5, false, Ink::Accent),
+                    )?);
+                    let arrow = if open { "\u{E70E}" } else { "\u{E70D}" };
+                    meta.push(b.text(Zone::Body, arrow, 0.0, 0.0, 20.0, icon(9.0, Ink::Accent))?);
+                }
+                let gaps = if definition.examples.is_empty() {
+                    0.0
+                } else {
+                    4.0
                 };
+                let meta_w = meta.iter().map(|(w, _)| w).sum::<f32>() + gaps;
+                let meta_h = meta.iter().map(|(_, h)| *h).fold(0.0, f32::max);
                 let left_w = tw - if meta.is_empty() { 0.0 } else { meta_w + 12.0 };
                 let first_h = if !definition.translation.trim().is_empty() {
                     b.text(
@@ -991,10 +1047,23 @@ pub fn build(
                     0.0
                 };
                 let first_h = first_h.max(meta_h);
-                if !meta.is_empty() {
-                    let piece = &mut b.frame.pieces[meta_piece];
-                    piece.x = WIDTH - PAD - meta_w;
-                    piece.y = y + (first_h.min(22.0) - meta_h) / 2.0 + 1.0;
+                let meta_y = y + (first_h.min(22.0) - meta_h) / 2.0 + 1.0;
+                let mut x = WIDTH - PAD - meta_w;
+                for (offset, (w, h)) in meta.iter().enumerate() {
+                    let piece = &mut b.frame.pieces[meta_pieces + offset];
+                    let is_arrow = !definition.examples.is_empty() && offset + 1 == meta.len();
+                    if is_arrow {
+                        x += 4.0;
+                    }
+                    piece.x = x;
+                    // The arrow glyph sits a little low next to the text.
+                    piece.y = meta_y
+                        + if is_arrow {
+                            (meta_h - h) / 2.0 + 1.0
+                        } else {
+                            0.0
+                        };
+                    x += w;
                 }
                 if first_h > 0.0 {
                     y += first_h + 2.0;
@@ -1045,8 +1114,10 @@ pub fn build(
                 }
                 y += 8.0;
                 let row = rect(8.0, top, row_w, y - top);
-                // The selected row only gets its bar; the row tint follows the mouse.
+                // The selected row floats: a raised glass tile under this row's own shapes,
+                // plus its accent bar. Other rows only tint under the mouse.
                 if index == view.selected {
+                    b.raise(Zone::Body, row, 10.0, shapes);
                     b.shape(
                         Zone::Body,
                         rect(13.0, top + 11.0, 3.0, y - top - 22.0),
@@ -1140,6 +1211,9 @@ pub fn paint(p: Paint) -> Result<()> {
         let warn = brush(theme.warn, 1.0)?;
         let row = brush(theme.row.0, theme.row.1)?;
         let line = brush(theme.line.0, theme.line.1)?;
+        let raised = brush(theme.raised.0, theme.raised.1)?;
+        let edge = brush(theme.edge.0, theme.edge.1)?;
+        let shadow = brush(theme.shadow.0, theme.shadow.1)?;
         let ink_of = |value: Ink| match value {
             Ink::Strong => &ink,
             Ink::Soft => &ink2,
@@ -1153,6 +1227,8 @@ pub fn paint(p: Paint) -> Result<()> {
             Fill::Accent => &accent,
             Fill::Muted => &muted,
             Fill::OnAccent => &on_accent,
+            Fill::Raised => &raised,
+            Fill::Shadow => &shadow,
         };
 
         target.BeginDraw();
@@ -1187,14 +1263,25 @@ pub fn paint(p: Paint) -> Result<()> {
                 let mut r = shape.rect;
                 r.top += dy;
                 r.bottom += dy;
-                target.FillRoundedRectangle(
-                    &D2D1_ROUNDED_RECT {
-                        rect: r,
-                        radiusX: shape.radius,
-                        radiusY: shape.radius,
-                    },
-                    fill_of(shape.fill),
-                );
+                let rounded = D2D1_ROUNDED_RECT {
+                    rect: r,
+                    radiusX: shape.radius,
+                    radiusY: shape.radius,
+                };
+                target.FillRoundedRectangle(&rounded, fill_of(shape.fill));
+                if shape.fill == Fill::Raised {
+                    // The highlight edge, half a pixel in so it stays sharp.
+                    let inner = D2D1_ROUNDED_RECT {
+                        rect: rect(
+                            r.left + 0.5,
+                            r.top + 0.5,
+                            r.right - r.left - 1.0,
+                            r.bottom - r.top - 1.0,
+                        ),
+                        ..rounded
+                    };
+                    target.DrawRoundedRectangle(&inner, &edge, 1.0, None);
+                }
             }
             for piece in frame.pieces.iter().filter(|p| p.zone == zone) {
                 let y = piece.y + dy;
