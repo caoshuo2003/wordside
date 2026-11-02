@@ -4,8 +4,9 @@
     "pos": ["noun", "verb"],
     "pronunciation": [
       { "pos": "noun", "lang": "uk", "pron": "/ˈrek.ɔːd/", "url": "https://dictionary.cambridge.org/media/sample-noun-uk.mp3" },
+      { "pos": "noun", "lang": "us", "pron": "/ˈrek.ɚd/", "url": "https://dictionary.cambridge.org/media/sample-noun-us.mp3" },
       { "pos": "verb", "lang": "uk", "pron": "/rɪˈkɔːd/", "url": "https://dictionary.cambridge.org/media/sample-verb-uk.mp3" },
-      { "pos": "noun", "lang": "us", "pron": "/ˈrek.ɚd/", "url": "" }
+      { "pos": "verb", "lang": "us", "pron": "/rɪˈkɔːrd/", "url": "https://dictionary.cambridge.org/media/sample-verb-us.mp3" }
     ],
     "definition": [
       { "pos": "noun [ C ]", "source": "", "text": "written information kept so that it can be looked at later", "translation": "记录，记载", "example": [

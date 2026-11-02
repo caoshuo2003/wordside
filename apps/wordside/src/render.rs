@@ -19,7 +19,7 @@ const MAX_CARD: f32 = 420.0;
 /// A tall header (many pronunciations) still leaves this much list in view.
 const MIN_BODY: f32 = 120.0;
 const FADE_H: f32 = 36.0;
-const GLASS_OPACITY: f32 = 0.92;
+const GLASS_OPACITY: f32 = 0.75;
 const ICON_FONT: PCWSTR = w!("Segoe MDL2 Assets");
 const TEXT_FONT: PCWSTR = w!("Segoe UI");
 
@@ -325,9 +325,10 @@ impl Builder<'_> {
             )?;
             width += iw + 4.0;
         }
+        // Every reading is a pill so none reads as stray text; only those with a sound respond.
         let pill = rect(x, y, width, h + 8.0);
+        self.shape(Zone::Head, pill, (h + 8.0) / 2.0, Fill::Row);
         if voiced {
-            self.shape(Zone::Head, pill, (h + 8.0) / 2.0, Fill::Row);
             self.hit(Zone::Head, pill, Action::Sound(index));
         }
         Ok((width, h + 8.0))
@@ -944,7 +945,7 @@ pub fn paint(p: Paint) -> Result<()> {
             target.PopAxisAlignedClip();
             // More below: fade the last lines out; gone once the list reaches its end.
             if scroll < frame.max_scroll() - 1.0 {
-                let to = if glass { 0.96 } else { 1.0 };
+                let to = if glass { 0.9 } else { 1.0 };
                 let stops = [
                     D2D1_GRADIENT_STOP {
                         position: 0.0,
