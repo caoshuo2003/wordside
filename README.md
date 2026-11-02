@@ -1,59 +1,50 @@
 <p align="center">
-  <img src="desktop/ciban-icon.png" width="88" alt="WordSide · 词伴图标">
+  <img src="docs/images/icon.png" width="64" alt="WordSide · 词伴图标">
 </p>
 <h1 align="center">WordSide · 词伴</h1>
-<p align="center">选中一个词，读懂它。<br>一个安静、紧凑的 Windows 划词词典。</p>
-<p align="center"><strong>0.2.0 · Windows x64 · Cambridge Dictionary</strong></p>
+<p align="center">选中一个词，读懂它。<br>一个安静、轻巧的 Windows 划词词典。</p>
+<p align="center"><strong>0.3.0 · Windows x64 · Cambridge Dictionary</strong></p>
 <p align="center">
-  <a href="https://github.com/caoshuo2003/wordside/releases/tag/v0.2.0">下载 WordSide</a> ·
+  <a href="https://github.com/caoshuo2003/wordside/releases/tag/v0.3.0">下载 WordSide</a> ·
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
   <a href="docs/FAQ.md">常见问题</a> ·
   <a href="docs/PRIVACY.md">隐私与数据</a>
 </p>
 
-**WordSide · 词伴** 是一款 Windows 划词词典，帮你在阅读旁查看 Cambridge Dictionary 的释义、音标、例句与发音。开启自动划词后，在支持读取选区的应用里选中英文单词，即可弹出浮窗；也可以按快捷键主动查询。
+**WordSide · 词伴** 是一款 Windows 划词词典，帮你在阅读时就近查看 Cambridge Dictionary 的释义、音标、例句与发音。开启自动划词后，选中英文单词，旁边就会弹出一张玻璃质感的小卡片；也可以按快捷键主动查询。
 
-![WordSide · 词伴：选中单词，释义在旁边展开](docs/images/hero.png)
-
-*界面预览，使用示例词条。[图片说明](docs/SCREENSHOTS.md)*
-
-**0.2.0 更新**：界面和图标全新设计，四套配色整窗染色，托盘和窗口图标跟着配色变；修复剪贴板里放着复制的文件时网页无法取词。[查看本版变化](docs/releases/v0.2.0.md)
+**0.3.0 是重写的新一代**：整个程序用 Rust 原生重写，只有一个约 4 MB 的 exe，不再需要 WebView2 和安装；平时只在托盘待命，几乎不占内存。界面换成一张拟态玻璃卡片。[查看本版变化](docs/releases/v0.3.0.md)
 
 ## 下载与开始
 
-从 [0.2.0 发布页](https://github.com/caoshuo2003/wordside/releases/tag/v0.2.0) 下载，选择一种方式即可：
+从 [0.3.0 发布页](https://github.com/caoshuo2003/wordside/releases/tag/v0.3.0) 下载：
 
 | 方式 | 下载 | 使用方式 |
 |---|---|---|
-| 安装版 · 推荐 | [Windows x64 安装包](https://github.com/caoshuo2003/wordside/releases/download/v0.2.0/WordSide_0.2.0_x64-setup.exe) | 按提示安装，然后打开 WordSide |
-| 便携版 | [ZIP 压缩包](https://github.com/caoshuo2003/wordside/releases/download/v0.2.0/WordSide_0.2.0-portable.zip) | 解压全部文件，运行其中的 WordSide |
+| 单个程序 · 推荐 | [WordSide_0.3.0.exe](https://github.com/caoshuo2003/wordside/releases/download/v0.3.0/WordSide_0.3.0.exe) | 放到任意文件夹，双击运行 |
+| 便携包 | [ZIP 压缩包](https://github.com/caoshuo2003/wordside/releases/download/v0.3.0/WordSide_0.3.0-portable.zip) | 解压后运行其中的程序，包内附使用说明和第三方许可 |
 
-需要 **Windows x64**、**Microsoft Edge WebView2** 和能访问 Cambridge 的网络。查词功能已内置，安装后即可开始。
+需要 **Windows x64** 和能访问 Cambridge 的网络。程序没有数字签名，第一次运行时 Windows 可能提示“已保护你的电脑”，点“更多信息”→“仍要运行”。
 
-1. 打开 WordSide，在顶部的查词框输入一个英文单词，按 Enter。
-2. 想选中就查，打开“自动划词”；想自己触发，选中单词后按 **Ctrl+Alt+A**。快捷键可以在设置里修改。
-3. 把浮窗拖到顺手的位置，调整大小，再选一套喜欢的配色。
+1. 运行后 WordSide 在任务栏右下角的托盘待命，不会弹出窗口。左键点托盘图标，可以直接输入单词查询。
+2. 想选中就查，在托盘右键菜单里勾选“自动划词”；想自己触发，选中单词后按 **Ctrl+Alt+A**。快捷键可以在卡片的设置里修改。
+3. 从 0.2.0 升级：先在托盘右键退出 0.2.0；用过安装版的，可以在 Windows“已安装的应用”里卸载它。快捷键、自动划词和外观设置会沿用。
 
-[完整使用指南](docs/USER-GUIDE.md) · [安装问题](docs/FAQ.md#安装与运行) · [取词与已知限制](docs/FAQ.md#取词与快捷键) · [隐私与数据](docs/PRIVACY.md) · [本版说明](docs/releases/v0.2.0.md)
+[完整使用指南](docs/USER-GUIDE.md) · [运行问题](docs/FAQ.md#安装与运行) · [取词与已知限制](docs/FAQ.md#取词与快捷键) · [隐私与数据](docs/PRIVACY.md) · [本版说明](docs/releases/v0.3.0.md)
 
 ## 功能一览
 
-![三种方式，随手就查：自动划词、快捷键和手动输入](docs/images/feature-capture.png)
-
-![一个浮窗，读懂一个词：发音、词性、释义、例句和原词典](docs/images/feature-popup.png)
-
-![四套配色，日夜随心](docs/images/feature-palettes.png)
-
 | 体验 | 使用方式 |
 |---|---|
-| 边读边查 | 自动划词、快捷键和手动输入，自由选择 |
-| 看释义、听发音 | 阅读英汉或英文释义、例句与音标，点击播放英式或美式发音 |
-| 调整浮窗 | 拖动、缩放，自动记住大小；固定后在同一窗口继续查新词 |
+| 边读边查 | 自动划词、快捷键和手动输入，自由选择；卡片出现在选区旁边，不抢走原窗口的焦点 |
+| 看释义、听发音 | 中文释义在前，英文解释和例句随后；点击播放英式或美式发音 |
+| 按词性浏览 | 词性标签显示各自的释义条数；例句按需展开 |
+| 键盘也能用 | ↑↓ 选择释义，→ 展开例句，Tab 切换词性，Esc 收起 |
 | 少操心一点选词 | 自动清理首尾标点；没查到时，查看词典提供的拼写建议 |
-| 换一种阅读氛围 | 薄荷绿、雾紫、浅蓝、暖灰，搭配日间、夜间或跟随系统；托盘和窗口图标随之换色 |
-| 随时收起或退出 | 关闭主窗口时选择隐藏到托盘或退出，双击托盘重新打开 |
+| 安静地待着 | 只在托盘待命，点卡片外面就收起；需要时用图钉固定卡片 |
+| 日夜都好看 | 浅色、深色或跟随系统；系统关闭透明效果时自动换成不透明卡片 |
 
-取词效果会随应用和文本区域而变化。读不到选区时，可以在 WordSide 中手动输入继续查词；Windows 桌面终端中的选词也遵循这一规则。连接或速度问题见[网络与速度](docs/FAQ.md#网络与速度)。
+取词效果会随应用和文本区域而变化。读不到选区时，可以在卡片里手动输入继续查词。连接或速度问题见[网络与速度](docs/FAQ.md#网络与速度)。
 
 查询词会发送到 Cambridge；个人设置保存在本机，词条只在内存中短期缓存，退出后清空。详细说明见[隐私与本地数据](docs/PRIVACY.md)。
 
@@ -65,6 +56,6 @@
 
 ## 反馈与参与
 
-遇到问题时，可以先在右下角托盘右键 WordSide，选择“退出 WordSide”，再重新打开。若问题仍然存在或能够复现，欢迎[提交 Issue](https://github.com/caoshuo2003/wordside/issues)，并附上 WordSide 版本、相关应用和操作步骤；截图请遮住私人信息。新想法和使用建议也欢迎在 Issue 中交流。
+遇到问题时，可以先在托盘右键 WordSide 选择“退出”，再重新打开。若问题仍然存在或能够复现，欢迎[提交 Issue](https://github.com/caoshuo2003/wordside/issues)，并附上 WordSide 版本、相关应用和操作步骤；截图请遮住私人信息。新想法和使用建议也欢迎在 Issue 中交流。
 
 [开发指南](docs/DEVELOPMENT.md) · [贡献与分支约定](CONTRIBUTING.md) · [路线图](docs/ROADMAP.md) · [更新记录](CHANGELOG.md)
