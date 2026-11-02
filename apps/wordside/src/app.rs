@@ -34,7 +34,7 @@ use windows::{
             Threading::*,
         },
         UI::{
-            Controls::MARGINS,
+            Controls::{MARGINS, WM_MOUSELEAVE},
             HiDpi::*,
             Input::{
                 Ime::{ImmAssociateContext, HIMC},
@@ -91,6 +91,8 @@ struct App {
     content: Content,
     query: String,
     scroll: f32,
+    /// Where the mouse is over the card, for the row tint; None once it leaves.
+    mouse: Option<(f32, f32)>,
     pinned: bool,
     choice: ThemeChoice,
     dark: bool,
@@ -291,6 +293,7 @@ impl App {
             glass: self.glass,
             frame: &self.frame,
             scroll: self.scroll,
+            mouse: self.mouse,
         });
         if let Err(error) = drawn {
             if error.code() != D2DERR_RECREATE_TARGET {
@@ -547,6 +550,7 @@ impl App {
     /// Hiding gives everything back: no render target, no layouts, trimmed working set.
     fn hide(&mut self) {
         self.stop_sound();
+        self.mouse = None;
         self.target = None;
         self.frame = Frame::default();
         unsafe {
@@ -698,6 +702,30 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         app.act(action);
                     }
                 });
+                LRESULT(0)
+            }
+            WM_MOUSEMOVE => {
+                let point = scaled_point(hwnd, lparam);
+                let mut entered = false;
+                with_app(|app| {
+                    entered = app.mouse.is_none();
+                    app.mouse = Some(point);
+                });
+                if entered {
+                    let mut track = TRACKMOUSEEVENT {
+                        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    };
+                    let _ = TrackMouseEvent(&mut track);
+                }
+                invalidate(hwnd);
+                LRESULT(0)
+            }
+            WM_MOUSELEAVE => {
+                with_app(|app| app.mouse = None);
+                invalidate(hwnd);
                 LRESULT(0)
             }
             WM_MOUSEWHEEL => {
@@ -858,6 +886,7 @@ pub fn run() -> Result<()> {
             content: initial_content(),
             query: String::new(),
             scroll: 0.0,
+            mouse: None,
             pinned: false,
             choice,
             dark: true,

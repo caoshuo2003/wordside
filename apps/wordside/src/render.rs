@@ -19,7 +19,7 @@ const MAX_CARD: f32 = 420.0;
 /// A tall header (many pronunciations) still leaves this much list in view.
 const MIN_BODY: f32 = 120.0;
 const FADE_H: f32 = 36.0;
-const GLASS_OPACITY: f32 = 0.85;
+const GLASS_OPACITY: f32 = 0.92;
 const ICON_FONT: PCWSTR = w!("Segoe MDL2 Assets");
 const TEXT_FONT: PCWSTR = w!("Segoe UI");
 
@@ -174,6 +174,24 @@ impl Frame {
                     && y < hit.rect.bottom
             })
             .map(|hit| hit.action.clone())
+    }
+    /// The definition row under the mouse, in body coordinates.
+    fn hovered_row(&self, x: f32, y: f32, scroll: f32) -> Option<D2D_RECT_F> {
+        let foot_top = self.head_h + self.visible_body();
+        if y < self.head_h || y >= foot_top {
+            return None;
+        }
+        let y = y - self.head_h + scroll;
+        self.hits
+            .iter()
+            .find(|hit| {
+                matches!(hit.action, Action::Sense(_))
+                    && x >= hit.rect.left
+                    && x < hit.rect.right
+                    && y >= hit.rect.top
+                    && y < hit.rect.bottom
+            })
+            .map(|hit| hit.rect)
     }
 }
 
@@ -735,8 +753,8 @@ pub fn build(
                 }
                 y += 8.0;
                 let row = rect(8.0, top, row_w, y - top);
+                // The selected row only gets its bar; the row tint follows the mouse.
                 if index == view.selected {
-                    b.shape(Zone::Body, row, 9.0, Fill::Row);
                     b.shape(
                         Zone::Body,
                         rect(12.0, top + 11.0, 3.0, y - top - 22.0),
@@ -809,6 +827,8 @@ pub struct Paint<'a> {
     pub glass: bool,
     pub frame: &'a Frame,
     pub scroll: f32,
+    /// The mouse position in the card, while it is over the card.
+    pub mouse: Option<(f32, f32)>,
 }
 
 pub fn paint(p: Paint) -> Result<()> {
@@ -818,7 +838,9 @@ pub fn paint(p: Paint) -> Result<()> {
         glass,
         frame,
         scroll,
+        mouse,
     } = p;
+    let hovered = mouse.and_then(|(x, y)| frame.hovered_row(x, y, scroll));
     unsafe {
         let brush = |rgb: u32, a: f32| target.CreateSolidColorBrush(&color(rgb, a), None);
         let ink = brush(theme.ink, 1.0)?;
@@ -857,6 +879,16 @@ pub fn paint(p: Paint) -> Result<()> {
         let body_h = frame.visible_body();
         let foot_top = body_top + body_h;
         let draw = |zone: Zone, dy: f32| {
+            if let (Zone::Body, Some(r)) = (zone, hovered) {
+                target.FillRoundedRectangle(
+                    &D2D1_ROUNDED_RECT {
+                        rect: moved(r, 0.0, dy),
+                        radiusX: 9.0,
+                        radiusY: 9.0,
+                    },
+                    &row,
+                );
+            }
             for shape in frame.shapes.iter().filter(|s| s.zone == zone) {
                 let mut r = shape.rect;
                 r.top += dy;
@@ -912,7 +944,7 @@ pub fn paint(p: Paint) -> Result<()> {
             target.PopAxisAlignedClip();
             // More below: fade the last lines out; gone once the list reaches its end.
             if scroll < frame.max_scroll() - 1.0 {
-                let to = if glass { 0.92 } else { 1.0 };
+                let to = if glass { 0.96 } else { 1.0 };
                 let stops = [
                     D2D1_GRADIENT_STOP {
                         position: 0.0,
