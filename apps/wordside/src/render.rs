@@ -14,7 +14,11 @@ pub const WIDTH: f32 = 388.0;
 const PAD: f32 = 16.0;
 pub const INPUT_H: f32 = 54.0;
 const FOOT_H: f32 = 34.0;
-const MAX_BODY: f32 = 480.0;
+/// The whole card stops growing here; the body scrolls instead.
+const MAX_CARD: f32 = 420.0;
+/// A tall header (many pronunciations) still leaves this much list in view.
+const MIN_BODY: f32 = 120.0;
+const FADE_H: f32 = 36.0;
 const GLASS_OPACITY: f32 = 0.85;
 const ICON_FONT: PCWSTR = w!("Segoe MDL2 Assets");
 const TEXT_FONT: PCWSTR = w!("Segoe UI");
@@ -121,11 +125,19 @@ pub struct Frame {
 }
 
 impl Frame {
+    fn foot_h(&self) -> f32 {
+        if self.has_foot {
+            FOOT_H
+        } else {
+            0.0
+        }
+    }
     pub fn visible_body(&self) -> f32 {
-        self.body_h.min(MAX_BODY)
+        let room = (MAX_CARD - self.head_h - self.foot_h()).max(MIN_BODY);
+        self.body_h.min(room)
     }
     pub fn height(&self) -> f32 {
-        self.head_h + self.visible_body() + if self.has_foot { FOOT_H } else { 0.0 }
+        self.head_h + self.visible_body() + self.foot_h()
     }
     pub fn max_scroll(&self) -> f32 {
         (self.body_h - self.visible_body()).max(0.0)
@@ -898,6 +910,40 @@ pub fn paint(p: Paint) -> Result<()> {
             );
             draw(Zone::Body, body_top - scroll);
             target.PopAxisAlignedClip();
+            // More below: fade the last lines out; gone once the list reaches its end.
+            if scroll < frame.max_scroll() - 1.0 {
+                let to = if glass { 0.92 } else { 1.0 };
+                let stops = [
+                    D2D1_GRADIENT_STOP {
+                        position: 0.0,
+                        color: color(theme.fill, 0.0),
+                    },
+                    D2D1_GRADIENT_STOP {
+                        position: 1.0,
+                        color: color(theme.fill, to),
+                    },
+                ];
+                let collection = target.CreateGradientStopCollection(
+                    &stops,
+                    D2D1_GAMMA_2_2,
+                    D2D1_EXTEND_MODE_CLAMP,
+                )?;
+                let fade = target.CreateLinearGradientBrush(
+                    &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                        startPoint: Vector2 {
+                            X: 0.0,
+                            Y: foot_top - FADE_H,
+                        },
+                        endPoint: Vector2 {
+                            X: 0.0,
+                            Y: foot_top,
+                        },
+                    },
+                    None,
+                    &collection,
+                )?;
+                target.FillRectangle(&rect(0.0, foot_top - FADE_H, WIDTH, FADE_H), &fade);
+            }
             if frame.max_scroll() > 0.0 {
                 let track = body_h - 8.0;
                 let thumb = (track * body_h / frame.body_h).max(24.0);
