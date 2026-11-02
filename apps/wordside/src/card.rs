@@ -53,6 +53,12 @@ impl EntryView {
         let mut groups: Vec<PosGroup> = Vec::new();
         for definition in &entry.definitions {
             let (label, key) = pos_label(&definition.pos);
+            // Senses Cambridge gives no part of speech would leave a bare count as the tab.
+            let label = if label.is_empty() {
+                "其他".to_owned()
+            } else {
+                label
+            };
             match groups.iter_mut().find(|group| group.key == key) {
                 Some(group) => group.count += 1,
                 None => groups.push(PosGroup {
@@ -417,6 +423,21 @@ mod tests {
             [("动词", 2), ("名词", 1)]
         );
         assert_eq!(card.visible().len(), 2);
+    }
+
+    #[test]
+    fn senses_without_a_part_of_speech_get_a_named_tab() {
+        // As for "com-": a prefix sense and one Cambridge leaves unlabelled.
+        let mut card = view(vec![definition("prefix", "共；同"), definition("", "公司")]);
+        assert_eq!(
+            card.groups
+                .iter()
+                .map(|g| (g.label.as_str(), g.count))
+                .collect::<Vec<_>>(),
+            [("前缀", 1), ("其他", 1)]
+        );
+        card.next_tab();
+        assert_eq!(card.visible()[0].translation, "公司");
     }
 
     #[test]
