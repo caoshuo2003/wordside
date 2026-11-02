@@ -14,6 +14,9 @@ mod render;
 mod selection_input;
 mod service;
 mod settings;
+// Copied unchanged from 0.2.0's capture layer; `HotkeyStatus` returns with capture in N3.
+#[allow(dead_code)]
+mod shortcut;
 mod tray;
 
 fn main() -> windows::core::Result<()> {
