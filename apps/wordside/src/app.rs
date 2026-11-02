@@ -1,6 +1,7 @@
 //! The window, the message loop and everything that reacts to input.
 use crate::{
-    card::{allowed_link, Content, EntryView, FailureView},
+    audio::{self, Player},
+    card::{allowed_link, Content, EntryView, FailureView, Sound},
     dictionary,
     entry::{read_api_entry, Entry, LookupError},
     render::{self, Action, Frame, Theme, DARK, INPUT_H, LIGHT, WIDTH},
@@ -10,6 +11,7 @@ use crate::{
 use serde_json::json;
 use std::{
     cell::RefCell,
+    collections::HashMap,
     sync::{Arc, Mutex, OnceLock},
     time::Instant,
 };
@@ -45,15 +47,33 @@ use windows::{
 };
 
 const WM_RESULT: u32 = WM_APP + 1;
+/// A pronunciation finished downloading.
+const WM_CLIP: u32 = WM_APP + 2;
+/// The player ended (lparam 0) or failed (lparam 1); wparam is the sound's serial.
+const WM_SOUND: u32 = WM_APP + 3;
 const CF_UNICODETEXT: u32 = 13;
 const SHOW_HOTKEY: i32 = 1;
 
 type Answer = (u64, String, Result2);
 type Result2 = std::result::Result<Entry, LookupError>;
+type Clip = (u64, String, std::result::Result<Vec<u8>, ()>);
 
 thread_local! { static APP: RefCell<Option<App>> = const { RefCell::new(None) }; }
 static ANSWER: Mutex<Option<Answer>> = Mutex::new(None);
+static CLIP: Mutex<Option<Clip>> = Mutex::new(None);
 static RUNTIME: OnceLock<(tokio::runtime::Runtime, Arc<Service>)> = OnceLock::new();
+
+/// Created on first use, so a card that was never used costs nothing here.
+fn runtime() -> &'static (tokio::runtime::Runtime, Arc<Service>) {
+    RUNTIME.get_or_init(|| {
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .expect("tokio runtime");
+        (runtime, Arc::new(Service::default()))
+    })
+}
 
 #[derive(Clone, Copy, PartialEq)]
 enum ThemeChoice {
@@ -78,6 +98,13 @@ struct App {
     serial: u64,
     last_word: String,
     task: Option<tokio::task::JoinHandle<()>>,
+    /// The sound being loaded or played: its serial and chip.
+    sound: Option<(u64, usize)>,
+    sound_serial: u64,
+    sound_task: Option<tokio::task::JoinHandle<()>>,
+    player: Option<Player>,
+    /// Sounds of the current entry, so replaying doesn't download again.
+    clips: HashMap<String, Vec<u8>>,
     report_paint: Option<Instant>,
 }
 
@@ -295,21 +322,15 @@ impl App {
         if let Some(task) = self.task.take() {
             task.abort();
         }
+        self.stop_sound();
+        self.clips.clear();
         self.serial += 1;
         let serial = self.serial;
         self.last_word = word.clone();
         self.content = Content::Loading;
         self.scroll = 0.0;
         self.rebuild();
-        // Created on the first lookup, so a card that was never used costs nothing here.
-        let (runtime, service) = RUNTIME.get_or_init(|| {
-            let runtime = tokio::runtime::Builder::new_multi_thread()
-                .worker_threads(2)
-                .enable_all()
-                .build()
-                .expect("tokio runtime");
-            (runtime, Arc::new(Service::default()))
-        });
+        let (runtime, service) = runtime();
         let service = service.clone();
         let hwnd = self.hwnd.0 as isize;
         self.task = Some(runtime.spawn(async move {
@@ -337,8 +358,100 @@ impl App {
         self.rebuild();
     }
 
+    /// Stops loading or playing. The views keep any failure so it stays visible.
+    fn stop_sound(&mut self) {
+        if let Some(task) = self.sound_task.take() {
+            task.abort();
+        }
+        self.player = None;
+        self.sound = None;
+        if let Content::Entry(view) = &mut self.content {
+            view.stop_sounds();
+        }
+    }
+
+    /// Clicking the chip that is loading or playing stops it; any other chip starts.
+    fn toggle_sound(&mut self, index: usize) {
+        let Content::Entry(view) = &self.content else {
+            return;
+        };
+        let Some(url) = view.sound_url(index).map(str::to_owned) else {
+            return;
+        };
+        let active = self.sound.is_some_and(|(_, chip)| chip == index);
+        self.stop_sound();
+        if !active {
+            self.start_sound(index, url);
+        }
+        self.rebuild();
+    }
+
+    fn start_sound(&mut self, index: usize, url: String) {
+        self.sound_serial += 1;
+        let serial = self.sound_serial;
+        self.sound = Some((serial, index));
+        if let Content::Entry(view) = &mut self.content {
+            view.set_sound(index, Sound::Loading);
+        }
+        // `--sound <file>` plays a local file in place of every pronunciation.
+        let local = option("--sound").map(|path| std::fs::read(path).map_err(|_| ()));
+        if let Some(clip) = local.or_else(|| self.clips.get(&url).cloned().map(Ok)) {
+            *CLIP.lock().unwrap() = Some((serial, url, clip));
+            self.receive_clip();
+            return;
+        }
+        let hwnd = self.hwnd.0 as isize;
+        self.sound_task = Some(runtime().0.spawn(async move {
+            let clip = audio::fetch(&url).await;
+            *CLIP.lock().unwrap() = Some((serial, url, clip));
+            unsafe {
+                let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_CLIP, WPARAM(0), LPARAM(0));
+            }
+        }));
+    }
+
+    fn receive_clip(&mut self) {
+        let Some((serial, url, clip)) = CLIP.lock().unwrap().take() else {
+            return;
+        };
+        let Some((current, index)) = self.sound.filter(|(current, _)| *current == serial) else {
+            return;
+        };
+        self.sound_task = None;
+        let name = option("--sound").unwrap_or_else(|| audio::clip_name(&url).to_owned());
+        let played = clip.ok().and_then(|clip| {
+            let player = Player::play(self.hwnd, WM_SOUND, current as usize, &name, &clip).ok();
+            self.clips.insert(url, clip);
+            player
+        });
+        let sound = if played.is_some() {
+            Sound::Playing
+        } else {
+            self.sound = None;
+            Sound::Failed
+        };
+        self.player = played;
+        if let Content::Entry(view) = &mut self.content {
+            view.set_sound(index, sound);
+        }
+        self.rebuild();
+    }
+
+    fn sound_ended(&mut self, serial: u64, failed: bool) {
+        let Some((_, index)) = self.sound.filter(|(current, _)| *current == serial) else {
+            return;
+        };
+        self.player = None;
+        self.sound = None;
+        if let Content::Entry(view) = &mut self.content {
+            view.set_sound(index, if failed { Sound::Failed } else { Sound::Idle });
+        }
+        self.rebuild();
+    }
+
     fn act(&mut self, action: Action) {
         match action {
+            Action::Sound(index) => self.toggle_sound(index),
             Action::Pin => {
                 self.pinned = !self.pinned;
                 self.rebuild();
@@ -393,6 +506,19 @@ impl App {
         } else if ctrl && key == VK_BACK.0 {
             self.query.clear();
             self.rebuild();
+        } else if ctrl && key == u16::from(b'P') {
+            let next = match &self.content {
+                Content::Entry(view) => view.next_sound(),
+                _ => None,
+            };
+            if let Some(index) = next {
+                self.stop_sound();
+                if let Content::Entry(view) = &self.content {
+                    let url = view.sound_url(index).unwrap_or_default().to_owned();
+                    self.start_sound(index, url);
+                }
+                self.rebuild();
+            }
         } else if let Content::Entry(view) = &mut self.content {
             if key == VK_DOWN.0 || key == VK_UP.0 {
                 view.move_selection(if key == VK_DOWN.0 { 1 } else { -1 });
@@ -420,6 +546,7 @@ impl App {
 
     /// Hiding gives everything back: no render target, no layouts, trimmed working set.
     fn hide(&mut self) {
+        self.stop_sound();
         self.target = None;
         self.frame = Frame::default();
         unsafe {
@@ -627,6 +754,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 update_and_fit(|app| app.receive());
                 LRESULT(0)
             }
+            WM_CLIP => {
+                update_and_fit(|app| app.receive_clip());
+                LRESULT(0)
+            }
+            WM_SOUND => {
+                update_and_fit(|app| app.sound_ended(wparam.0 as u64, lparam.0 != 0));
+                LRESULT(0)
+            }
             WM_DESTROY => {
                 PostQuitMessage(0);
                 LRESULT(0)
@@ -730,6 +865,11 @@ pub fn run() -> Result<()> {
             serial: 0,
             last_word: String::new(),
             task: None,
+            sound: None,
+            sound_serial: 0,
+            sound_task: None,
+            player: None,
+            clips: HashMap::new(),
             report_paint: flag("--first-paint").then_some(start),
         };
         app.refresh_theme();

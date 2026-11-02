@@ -1,6 +1,6 @@
 //! Lays the card out with DirectWrite and draws it with Direct2D.
-use crate::card::{Content, Coverage};
-use crate::presentation::source_label;
+use crate::card::{Content, Coverage, Sound};
+use crate::presentation::{source_label, PronunciationChip};
 use windows::{
     core::{w, Result, PCWSTR},
     Win32::Graphics::{
@@ -84,6 +84,7 @@ pub enum Action {
     Suggestion(String),
     Retry,
     Open(String),
+    Sound(usize),
 }
 
 struct Piece {
@@ -196,6 +197,24 @@ impl Builder<'_> {
         width: f32,
         style: Style,
     ) -> Result<(f32, f32)> {
+        let ink = style.ink;
+        let (layout, size) = self.layout(text, width, style)?;
+        self.frame.pieces.push(Piece {
+            layout,
+            x,
+            y,
+            ink,
+            zone,
+        });
+        Ok(size)
+    }
+
+    fn layout(
+        &self,
+        text: &str,
+        width: f32,
+        style: Style,
+    ) -> Result<(IDWriteTextLayout, (f32, f32))> {
         unsafe {
             let weight = if style.bold {
                 DWRITE_FONT_WEIGHT_SEMI_BOLD
@@ -217,15 +236,71 @@ impl Builder<'_> {
                 .CreateTextLayout(&wide, &format, width, 4000.0)?;
             let mut metrics = DWRITE_TEXT_METRICS::default();
             layout.GetMetrics(&mut metrics)?;
-            self.frame.pieces.push(Piece {
+            Ok((
                 layout,
-                x,
-                y,
-                ink: style.ink,
-                zone,
-            });
-            Ok((metrics.widthIncludingTrailingWhitespace, metrics.height))
+                (metrics.widthIncludingTrailingWhitespace, metrics.height),
+            ))
         }
+    }
+
+    /// A pronunciation pill. Returns its width and height; the caller wraps the row.
+    fn chip(
+        &mut self,
+        x: f32,
+        y: f32,
+        chip: &PronunciationChip,
+        sound: Sound,
+        index: usize,
+    ) -> Result<(f32, f32)> {
+        let prefix = if chip.pos.is_empty() {
+            String::new()
+        } else {
+            format!("{} ", chip.pos)
+        };
+        let label = format!("{prefix}{} {}", chip.lang, chip.pron);
+        let voiced = !chip.url.is_empty();
+        let ink = match sound {
+            Sound::Loading | Sound::Playing => Ink::Accent,
+            Sound::Failed => Ink::Muted,
+            Sound::Idle if voiced => Ink::Ink,
+            Sound::Idle => Ink::Ink2,
+        };
+        let (w, h) = self.text(
+            Zone::Head,
+            &label,
+            x + 10.0,
+            y + 4.0,
+            300.0,
+            style(13.0, false, ink),
+        )?;
+        let mut width = w + 20.0;
+        if voiced {
+            let icon = match sound {
+                Sound::Loading | Sound::Playing => "\u{E71A}",
+                Sound::Failed => "\u{E72C}",
+                Sound::Idle => "\u{E767}",
+            };
+            let (iw, _) = self.text(
+                Zone::Head,
+                icon,
+                x + 10.0 + w + 4.0,
+                y + 7.0,
+                20.0,
+                Style {
+                    size: 12.0,
+                    bold: false,
+                    ink,
+                    font: ICON_FONT,
+                },
+            )?;
+            width += iw + 4.0;
+        }
+        let pill = rect(x, y, width, h + 8.0);
+        if voiced {
+            self.shape(Zone::Head, pill, (h + 8.0) / 2.0, Fill::Row);
+            self.hit(Zone::Head, pill, Action::Sound(index));
+        }
+        Ok((width, h + 8.0))
     }
 
     fn shape(&mut self, zone: Zone, rect: D2D_RECT_F, radius: f32, fill: Fill) {
@@ -279,6 +354,10 @@ const fn rect(x: f32, y: f32, w: f32, h: f32) -> D2D_RECT_F {
         right: x + w,
         bottom: y + h,
     }
+}
+
+const fn moved(r: D2D_RECT_F, dx: f32, dy: f32) -> D2D_RECT_F {
+    rect(r.left + dx, r.top + dy, r.right - r.left, r.bottom - r.top)
 }
 
 pub fn build(
@@ -438,27 +517,46 @@ pub fn build(
                 head += h + 2.0;
             }
             if !view.chips.is_empty() {
+                head += 4.0;
                 let mut x = PAD;
                 let mut line_h = 0.0f32;
-                for chip in &view.chips {
-                    let prefix = if chip.pos.is_empty() {
-                        String::new()
-                    } else {
-                        format!("{} ", chip.pos)
-                    };
-                    let label = format!("{prefix}{} {}", chip.lang, chip.pron);
-                    let (w, h) = b.text(
-                        Zone::Head,
-                        &label,
-                        x,
-                        head,
-                        WIDTH - x - PAD,
-                        style(13.0, false, Ink::Ink2),
-                    )?;
-                    x += w + 16.0;
+                for (index, chip) in view.chips.iter().enumerate() {
+                    let pieces = b.frame.pieces.len();
+                    let shapes = b.frame.shapes.len();
+                    let hits = b.frame.hits.len();
+                    let (w, h) = b.chip(x, head, chip, view.sounds[index], index)?;
+                    // Too wide for what is left of the row: move the pill to a new one.
+                    if x > PAD && x + w > WIDTH - PAD {
+                        let (dx, dy) = (PAD - x, line_h + 6.0);
+                        for piece in &mut b.frame.pieces[pieces..] {
+                            piece.x += dx;
+                            piece.y += dy;
+                        }
+                        for shape in &mut b.frame.shapes[shapes..] {
+                            shape.rect = moved(shape.rect, dx, dy);
+                        }
+                        for hit in &mut b.frame.hits[hits..] {
+                            hit.rect = moved(hit.rect, dx, dy);
+                        }
+                        head += dy;
+                        x = PAD;
+                        line_h = 0.0;
+                    }
+                    x += w + 6.0;
                     line_h = line_h.max(h);
                 }
-                head += line_h + 8.0;
+                head += line_h + 6.0;
+                if view.sounds.contains(&Sound::Failed) {
+                    let (_, h) = b.text(
+                        Zone::Head,
+                        "发音暂时无法播放，点击重试。",
+                        PAD,
+                        head,
+                        width,
+                        style(12.0, false, Ink::Muted),
+                    )?;
+                    head += h + 4.0;
+                }
             }
             match view.coverage {
                 Coverage::English => {
@@ -654,10 +752,14 @@ pub fn build(
             b.frame.has_foot = true;
             b.text(
                 Zone::Foot,
-                "↑↓ 选择   → 例句   Esc 关闭",
+                if view.has_sound() {
+                    "↑↓ 选择   → 例句   Ctrl+P 发音   Esc 关闭"
+                } else {
+                    "↑↓ 选择   → 例句   Esc 关闭"
+                },
                 PAD,
                 9.0,
-                220.0,
+                WIDTH - PAD * 2.0 - 66.0,
                 style(12.0, false, Ink::Muted),
             )?;
             let (w, _) = b.text(

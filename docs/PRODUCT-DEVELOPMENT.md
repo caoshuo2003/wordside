@@ -145,7 +145,7 @@ apps/wordside/src/
 | 玻璃效果 | 默认用未公开的 `SetWindowCompositionAttribute`，调用失败或系统关闭透明效果就退回不透明；在其他电脑确认公开的 `DWMSBT_TRANSIENTWINDOW` 不抢焦点也有效后再切换 | 原型中前者不抢焦点时有效，性能几乎不变；后者在开发机上没有效果 |
 | 字体 | 用系统字体（Segoe UI、微软雅黑、Georgia），不内置 | 内置中文字体子集约 1 MB，占预算太多 |
 | 网络 | 继续用 reqwest + rustls | 读取单词 API 不动；原型已证明体积够用 |
-| 发音 | Windows Media Foundation | 不引入 MP3 解码库，具体方案在 N2 验证 |
+| 发音 | Windows Media Foundation | 不引入 MP3 解码库。音频只从 Cambridge 下载到内存（上限 2 MB、10 秒），用媒体引擎从内存播放，不写磁盘；停止或隐藏卡片即释放 |
 | 实机测试隔离 | 标记 `#[ignore]`，另设显式命令运行 | `cargo test` 默认安全，不再需要 16 个过滤器 |
 | 取消机制 | 中止查询任务，界面只接受最新序号的结果 | 去掉 30 ms 轮询，也不用再共享计数器 |
 | 空闲时运行时 | tokio 运行时首次查询时才创建 | 保持后台占用低 |

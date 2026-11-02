@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod app;
+mod audio;
 mod cache;
 mod card;
 // Some backend diagnostics are only reached by the CLI entries added later in this milestone.

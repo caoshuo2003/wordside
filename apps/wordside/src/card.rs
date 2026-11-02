@@ -22,11 +22,22 @@ pub enum Coverage {
     Empty,
 }
 
+/// Where one pronunciation chip stands. Only one sound loads or plays at a time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Sound {
+    Idle,
+    Loading,
+    Playing,
+    Failed,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EntryView {
     pub entry: Entry,
     pub groups: Vec<PosGroup>,
     pub chips: Vec<PronunciationChip>,
+    pub sounds: Vec<Sound>,
+    last_sound: Option<usize>,
     pub coverage: Coverage,
     pub tab: usize,
     pub selected: usize,
@@ -62,6 +73,8 @@ impl EntryView {
         Self {
             entry,
             groups,
+            sounds: vec![Sound::Idle; chips.len()],
+            last_sound: None,
             chips,
             coverage,
             tab: 0,
@@ -120,6 +133,45 @@ impl EntryView {
 
     pub fn set_expanded(&mut self, open: bool) {
         self.expanded = open.then_some(self.selected);
+    }
+
+    pub fn sound_url(&self, index: usize) -> Option<&str> {
+        self.chips
+            .get(index)
+            .map(|chip| chip.url.as_str())
+            .filter(|url| !url.is_empty())
+    }
+
+    pub fn has_sound(&self) -> bool {
+        (0..self.chips.len()).any(|index| self.sound_url(index).is_some())
+    }
+
+    /// Ctrl+P: the next chip with a sound after the one played last, wrapping around.
+    pub fn next_sound(&self) -> Option<usize> {
+        let count = self.chips.len();
+        let start = self.last_sound.map_or(0, |index| index + 1);
+        (0..count)
+            .map(|step| (start + step) % count)
+            .find(|&index| self.sound_url(index).is_some())
+    }
+
+    /// A chip that starts loading stops whatever else was loading or playing.
+    pub fn set_sound(&mut self, index: usize, sound: Sound) {
+        if sound == Sound::Loading {
+            self.stop_sounds();
+            self.last_sound = Some(index);
+        }
+        if let Some(slot) = self.sounds.get_mut(index) {
+            *slot = sound;
+        }
+    }
+
+    pub fn stop_sounds(&mut self) {
+        for sound in &mut self.sounds {
+            if matches!(sound, Sound::Loading | Sound::Playing) {
+                *sound = Sound::Idle;
+            }
+        }
     }
 }
 
@@ -258,6 +310,49 @@ mod tests {
         assert_eq!(card.origin(), None);
         card.entry.query = "ran".into();
         assert_eq!(card.origin().unwrap(), "ran → run");
+    }
+
+    fn voiced(urls: &[&str]) -> EntryView {
+        let pronunciation: Vec<_> = urls
+            .iter()
+            .enumerate()
+            .map(|(index, url)| json!({"pos":"noun","lang":"uk","pron":format!("/p{index}/"),"url":url}))
+            .collect();
+        EntryView::new(read_api_entry(&json!({"entry":{"word":"run","pos":[],"definition":[],"pronunciation":pronunciation}}), "run", "en-cn").unwrap())
+    }
+
+    #[test]
+    fn ctrl_p_cycles_through_chips_that_have_a_sound() {
+        let base = "https://dictionary.cambridge.org/media/";
+        let mut card = voiced(&[&format!("{base}a.mp3"), "", &format!("{base}c.mp3")]);
+        assert!(card.has_sound());
+        assert_eq!(card.next_sound(), Some(0));
+        card.set_sound(0, Sound::Loading);
+        assert_eq!(
+            card.next_sound(),
+            Some(2),
+            "a chip without a sound is skipped"
+        );
+        card.set_sound(2, Sound::Loading);
+        assert_eq!(card.next_sound(), Some(0));
+        assert!(!voiced(&[""]).has_sound());
+        assert_eq!(voiced(&[]).next_sound(), None);
+    }
+
+    #[test]
+    fn only_one_sound_loads_or_plays_and_failures_stay_visible() {
+        let base = "https://dictionary.cambridge.org/media/";
+        let mut card = voiced(&[
+            &format!("{base}a.mp3"),
+            &format!("{base}b.mp3"),
+            &format!("{base}c.mp3"),
+        ]);
+        card.set_sound(0, Sound::Failed);
+        card.set_sound(1, Sound::Playing);
+        card.set_sound(2, Sound::Loading);
+        assert_eq!(card.sounds, [Sound::Failed, Sound::Idle, Sound::Loading]);
+        card.stop_sounds();
+        assert_eq!(card.sounds, [Sound::Failed, Sound::Idle, Sound::Idle]);
     }
 
     #[test]
