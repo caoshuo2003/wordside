@@ -1,13 +1,18 @@
 //! The window, the message loop and everything that reacts to input.
 use crate::{
     audio::{self, Player},
-    card::{allowed_link, Content, EntryView, FailureView, Sound},
+    card::{
+        allowed_link, pressed_combo, Content, EntryView, FailureView, SettingsChange, SettingsKey,
+        SettingsView, Sound,
+    },
     dictionary,
     entry::{read_api_entry, Entry, LookupError},
+    presentation::shortcut_notice,
     render::{self, Action, Frame, Theme, DARK, INPUT_H, LIGHT, WIDTH},
     selection_input::selected_word,
     service::Service,
     settings::{self, Settings},
+    shortcut,
     tray::{self, Command, WM_TRAY},
 };
 use serde_json::json;
@@ -61,8 +66,6 @@ const WM_SOUND: u32 = WM_APP + 3;
 const WM_SHOW: u32 = WM_APP + 5;
 const CF_UNICODETEXT: u32 = 13;
 const SHOW_HOTKEY: i32 = 1;
-/// The temporary shortcut registered below, until capture lands in N3.
-const SHOW_HOTKEY_LABEL: &str = "Ctrl+Alt+A";
 const CLASS: windows::core::PCWSTR = w!("WordSideCard");
 /// Per session, named after the app identifier so it never collides with other apps.
 /// Its existence marks the running copy; signalling it asks that copy to show the card.
@@ -124,7 +127,30 @@ struct App {
     clips: HashMap<String, Vec<u8>>,
     settings: Settings,
     settings_path: Option<PathBuf>,
+    /// The settings page, while it is open in place of the card.
+    page: Option<SettingsView>,
+    /// Whether the saved shortcut is registered; another program may hold it.
+    hotkey_active: bool,
     report_paint: Option<Instant>,
+}
+
+/// Registers the lookup shortcut written as in the settings file. An empty one is off,
+/// which counts as success. Until capture lands in N3 this is a plain `RegisterHotKey`.
+fn register_hotkey(hwnd: HWND, text: &str) -> bool {
+    unsafe {
+        let _ = UnregisterHotKey(Some(hwnd), SHOW_HOTKEY);
+        match shortcut::parse(text) {
+            Ok(Some(hotkey)) => RegisterHotKey(
+                Some(hwnd),
+                SHOW_HOTKEY,
+                HOT_KEY_MODIFIERS(hotkey.modifiers) | MOD_NOREPEAT,
+                hotkey.key,
+            )
+            .is_ok(),
+            Ok(None) => true,
+            Err(_) => false,
+        }
+    }
 }
 
 fn flag(name: &str) -> bool {
@@ -236,7 +262,11 @@ impl App {
 
     /// Rebuilds the layout. The window follows on the next `fit`, outside this borrow.
     fn rebuild(&mut self) {
-        if let Ok(frame) = render::build(&self.dwrite, &self.content, &self.query, self.pinned) {
+        let frame = match &self.page {
+            Some(page) => render::build_settings(&self.dwrite, page, &self.settings),
+            None => render::build(&self.dwrite, &self.content, &self.query, self.pinned),
+        };
+        if let Ok(frame) = frame {
             self.frame = frame;
         }
         self.scroll = self.scroll.clamp(0.0, self.frame.max_scroll());
@@ -472,6 +502,19 @@ impl App {
     fn act(&mut self, action: Action) {
         match action {
             Action::Sound(index) => self.toggle_sound(index),
+            Action::OpenSettings => self.open_settings(),
+            Action::Settings(row, change) => {
+                if let Some(page) = &mut self.page {
+                    // A click elsewhere while recording leaves the old shortcut in place.
+                    if page.recording {
+                        self.stop_recording();
+                    }
+                }
+                if let Some(page) = &mut self.page {
+                    page.row = row;
+                }
+                self.change(change);
+            }
             Action::Pin => {
                 self.pinned = !self.pinned;
                 self.rebuild();
@@ -516,8 +559,18 @@ impl App {
     }
 
     fn key(&mut self, key: u16) {
+        if let Some(page) = &self.page {
+            if page.recording {
+                self.record_key(key);
+            } else {
+                self.settings_key(key);
+            }
+            return;
+        }
         let ctrl = unsafe { GetKeyState(VK_CONTROL.0 as i32) } < 0;
-        if key == VK_RETURN.0 {
+        if ctrl && key == VK_OEM_COMMA.0 {
+            self.open_settings();
+        } else if key == VK_RETURN.0 {
             self.submit(false);
         } else if key == VK_ESCAPE.0 {
             self.hide();
@@ -566,6 +619,10 @@ impl App {
 
     /// Hiding gives everything back: no render target, no layouts, trimmed working set.
     fn hide(&mut self) {
+        // The next show is the lookup card again.
+        if self.page.is_some() {
+            self.close_settings();
+        }
         self.stop_sound();
         self.mouse = None;
         self.target = None;
@@ -576,18 +633,155 @@ impl App {
         }
     }
 
-    /// Changes only once the file is saved, so the menu never shows a state that would be lost.
-    fn toggle_auto(&mut self) {
-        let mut next = self.settings.clone();
-        next.enabled = !next.enabled;
+    /// Every change goes through here and only takes once the file is saved, so what the
+    /// card and the tray show is always what the next start will read.
+    fn save(&mut self, next: Settings) -> bool {
         let saved = self
             .settings_path
             .as_deref()
             .is_some_and(|path| settings::save(path, &next).is_ok());
         if saved {
             self.settings = next;
+        } else if let Some(page) = &mut self.page {
+            page.notice = Some("设置未能保存，请稍后再试。".into());
+        }
+        saved
+    }
+
+    fn toggle_auto(&mut self) {
+        let mut next = self.settings.clone();
+        next.enabled = !next.enabled;
+        if self.save(next) {
             tray::update(self.hwnd, self.settings.enabled);
         }
+    }
+
+    fn set_theme(&mut self, theme: &str) {
+        let mut next = self.settings.clone();
+        next.theme = theme.to_owned();
+        if self.save(next) {
+            self.choice = match theme {
+                "light" => ThemeChoice::Light,
+                "dark" => ThemeChoice::Dark,
+                _ => ThemeChoice::System,
+            };
+            self.refresh_theme();
+        }
+    }
+
+    fn open_settings(&mut self) {
+        let notice = (!self.hotkey_active && !self.settings.lookup_hotkey.is_empty())
+            .then(|| shortcut_notice("占用").to_owned());
+        self.page = Some(SettingsView {
+            notice,
+            ..Default::default()
+        });
+        self.scroll = 0.0;
+        self.rebuild();
+    }
+
+    fn close_settings(&mut self) {
+        if self.page.as_ref().is_some_and(|page| page.recording) {
+            self.stop_recording();
+        }
+        self.page = None;
+        self.scroll = 0.0;
+        self.rebuild();
+    }
+
+    fn change(&mut self, change: SettingsChange) {
+        match change {
+            SettingsChange::Nothing => {}
+            SettingsChange::Close => self.close_settings(),
+            SettingsChange::ToggleAuto => self.toggle_auto(),
+            SettingsChange::Theme(theme) => self.set_theme(theme),
+            SettingsChange::StopRecording => self.stop_recording(),
+            SettingsChange::Record => {
+                // Off while recording, so pressing the current combination records it too.
+                unsafe {
+                    let _ = UnregisterHotKey(Some(self.hwnd), SHOW_HOTKEY);
+                }
+                if let Some(page) = &mut self.page {
+                    page.recording = true;
+                    page.notice = None;
+                }
+            }
+        }
+        if self.page.is_some() {
+            self.rebuild();
+        }
+    }
+
+    /// Back to the shortcut that was saved.
+    fn stop_recording(&mut self) {
+        self.hotkey_active = register_hotkey(self.hwnd, &self.settings.lookup_hotkey);
+        if let Some(page) = &mut self.page {
+            page.recording = false;
+        }
+    }
+
+    /// A key while recording. The new shortcut replaces the old one only once it is both
+    /// registered and saved; otherwise the old one stays and the reason shows.
+    fn record_key(&mut self, key: u16) {
+        let down = |vk: VIRTUAL_KEY| unsafe { GetKeyState(vk.0 as i32) } < 0;
+        let (ctrl, alt, shift) = (down(VK_CONTROL), down(VK_MENU), down(VK_SHIFT));
+        let text = if key == VK_ESCAPE.0 {
+            self.stop_recording();
+            self.rebuild();
+            return;
+        } else if key == VK_BACK.0 && !ctrl && !alt && !shift {
+            String::new()
+        } else {
+            let Some(combo) = pressed_combo(ctrl, alt, shift, key) else {
+                return;
+            };
+            match shortcut::parse(&combo) {
+                Ok(Some(hotkey)) => hotkey.text,
+                Ok(None) => String::new(),
+                Err(error) => {
+                    if let Some(page) = &mut self.page {
+                        page.notice = Some(shortcut_notice(&error).to_owned());
+                    }
+                    self.rebuild();
+                    return;
+                }
+            }
+        };
+        let notice = if !register_hotkey(self.hwnd, &text) {
+            Some(shortcut_notice("占用"))
+        } else {
+            let mut next = self.settings.clone();
+            next.lookup_hotkey = text;
+            if self.save(next) {
+                None
+            } else {
+                Some("快捷键未能保存，请稍后再试。")
+            }
+        };
+        self.stop_recording();
+        if let Some(page) = &mut self.page {
+            page.notice = notice.map(str::to_owned);
+        }
+        self.rebuild();
+    }
+
+    fn settings_key(&mut self, key: u16) {
+        let key = match VIRTUAL_KEY(key) {
+            VK_UP => SettingsKey::Up,
+            VK_DOWN => SettingsKey::Down,
+            VK_LEFT => SettingsKey::Left,
+            VK_RIGHT => SettingsKey::Right,
+            VK_RETURN | VK_SPACE => SettingsKey::Enter,
+            VK_ESCAPE => SettingsKey::Escape,
+            _ => return,
+        };
+        let theme = self.settings.theme.clone();
+        let Some(page) = &mut self.page else {
+            return;
+        };
+        let change = page.key(key, &theme);
+        self.change(change);
+        self.rebuild();
     }
 
     fn show(&mut self) {
@@ -771,6 +965,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_CHAR => {
                 let c = char::from_u32(wparam.0 as u32).unwrap_or('\0');
                 with_app(|app| {
+                    if app.page.is_some() {
+                        return;
+                    }
                     if c == '\u{8}' {
                         app.query.pop();
                     } else if !c.is_control() && app.query.chars().count() < 100 {
@@ -786,6 +983,19 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_KEYDOWN => {
                 let key = wparam.0 as u16;
                 update_and_fit(|app| app.key(key));
+                LRESULT(0)
+            }
+            // Alt combinations arrive as system keys; only recording a shortcut wants them.
+            WM_SYSKEYDOWN | WM_SYSCHAR => {
+                let mut recording = false;
+                with_app(|app| recording = app.page.as_ref().is_some_and(|page| page.recording));
+                if !recording {
+                    return DefWindowProcW(hwnd, msg, wparam, lparam);
+                }
+                if msg == WM_SYSKEYDOWN {
+                    let key = wparam.0 as u16;
+                    update_and_fit(|app| app.key(key));
+                }
                 LRESULT(0)
             }
             WM_ACTIVATE => {
@@ -812,10 +1022,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         with_app(|app| app.show());
                     }
                     WM_RBUTTONUP => {
-                        let mut enabled = false;
-                        with_app(|app| enabled = app.settings.enabled);
+                        let (mut enabled, mut hotkey) = (false, String::new());
+                        with_app(|app| {
+                            enabled = app.settings.enabled;
+                            if app.hotkey_active {
+                                hotkey = app.settings.lookup_hotkey.clone();
+                            }
+                        });
                         // The menu runs its own message loop, so the app is not borrowed here.
-                        match tray::menu(hwnd, enabled, SHOW_HOTKEY_LABEL) {
+                        match tray::menu(hwnd, enabled, &hotkey) {
                             Some(Command::ToggleAuto) => {
                                 with_app(|app| app.toggle_auto());
                             }
@@ -825,7 +1040,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             Some(Command::Quit) => {
                                 let _ = DestroyWindow(hwnd);
                             }
-                            Some(Command::Settings) | None => {}
+                            Some(Command::Settings) => {
+                                update_and_fit(|app| {
+                                    app.open_settings();
+                                    app.show();
+                                });
+                            }
+                            None => {}
                         }
                     }
                     _ => {}
@@ -981,18 +1202,12 @@ pub fn run() -> Result<()> {
             size_of_val(&corner) as u32,
         );
         let glass = enable_glass(hwnd);
-        // Temporary until capture lands in N3, which owns the real shortcut.
-        let _ = RegisterHotKey(
-            Some(hwnd),
-            SHOW_HOTKEY,
-            MOD_ALT | MOD_CONTROL,
-            u32::from(b'A'),
-        );
         let settings_path = settings::path();
         let preferences = settings_path
             .as_deref()
             .map(settings::load)
             .unwrap_or_default();
+        let hotkey_active = register_hotkey(hwnd, &preferences.lookup_hotkey);
         TASKBAR_CREATED.store(tray::taskbar_created(), Ordering::Relaxed);
         tray::add(hwnd, preferences.enabled);
         if let Instance::First(event) = launch {
@@ -1033,6 +1248,8 @@ pub fn run() -> Result<()> {
             clips: HashMap::new(),
             settings: preferences,
             settings_path,
+            page: None,
+            hotkey_active,
             report_paint: flag("--first-paint").then_some(start),
         };
         app.refresh_theme();

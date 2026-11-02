@@ -116,6 +116,22 @@ pub fn source_label(id: &str) -> String {
     }
 }
 
+/// Turns a shortcut failure into advice without showing the raw error.
+pub fn shortcut_notice(error: &str) -> &'static str {
+    if error.contains("占用") {
+        "这组快捷键已被占用，请换一组。"
+    } else if error.contains("未响应") || error.contains("重新启动") {
+        "快捷键暂不可用，请重启 WordSide。"
+    } else if ["修饰键重复", "只能包含", "请使用 Ctrl", "需包含 Ctrl"]
+        .iter()
+        .any(|part| error.contains(part))
+    {
+        "请使用 Ctrl 或 Alt 搭配一个字母、数字或功能键。"
+    } else {
+        "快捷键未能保存，请稍后再试。"
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct PronunciationChip {
     pub lang: String,
@@ -278,6 +294,17 @@ mod tests {
             lang: lang.into(),
             pron: pron.into(),
             url: url.into(),
+        }
+    }
+
+    // Ported from 0.2.0 `shortcut failures preserve useful conflict guidance without exposing raw errors`.
+    #[test]
+    fn shortcut_failures_keep_useful_guidance_without_raw_errors() {
+        assert!(shortcut_notice("这组快捷键已被其他程序占用。原快捷键仍保留。").contains("占用"));
+        assert!(shortcut_notice("快捷键服务未响应，请重新启动 WordSide。").contains("重启"));
+        assert!(shortcut_notice("快捷键修饰键重复。").contains("Ctrl 或 Alt"));
+        for raw in ["API HTTP 502 definition.translation UNKNOWN_OS_ERROR", ""] {
+            assert_eq!(shortcut_notice(raw), "快捷键未能保存，请稍后再试。");
         }
     }
 

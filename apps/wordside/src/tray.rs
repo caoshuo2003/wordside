@@ -130,13 +130,7 @@ pub fn menu(hwnd: HWND, enabled: bool, hotkey: &str) -> Option<Command> {
         );
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, Command::Lookup as usize, &lookup);
-        // The settings page arrives later in this milestone.
-        let _ = AppendMenuW(
-            menu,
-            MF_STRING | MF_GRAYED,
-            Command::Settings as usize,
-            w!("设置"),
-        );
+        let _ = AppendMenuW(menu, MF_STRING, Command::Settings as usize, w!("设置"));
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let _ = AppendMenuW(menu, MF_STRING, Command::Quit as usize, w!("退出"));
         let mut point = POINT::default();

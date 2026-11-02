@@ -217,6 +217,105 @@ pub enum Content {
     Failure(FailureView),
 }
 
+/// The appearance choices, in the order the settings page shows them.
+pub const THEMES: [(&str, &str); 3] = [("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")];
+
+pub fn theme_index(theme: &str) -> usize {
+    THEMES.iter().position(|(id, _)| *id == theme).unwrap_or(0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SettingsKey {
+    Up,
+    Down,
+    Left,
+    Right,
+    Enter,
+    Escape,
+}
+
+/// What a key or click on the settings page asks the app to do.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SettingsChange {
+    Nothing,
+    Close,
+    ToggleAuto,
+    Record,
+    StopRecording,
+    Theme(&'static str),
+}
+
+/// The settings page: auto lookup, the lookup shortcut and the appearance, one per row.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SettingsView {
+    pub row: usize,
+    /// Waiting for the user to press a new shortcut.
+    pub recording: bool,
+    /// Why the last change didn't take, shown under the shortcut row.
+    pub notice: Option<String>,
+}
+
+impl SettingsView {
+    pub const ROWS: usize = 3;
+
+    pub fn key(&mut self, key: SettingsKey, theme: &str) -> SettingsChange {
+        if self.recording {
+            return match key {
+                SettingsKey::Escape => SettingsChange::StopRecording,
+                _ => SettingsChange::Nothing,
+            };
+        }
+        let current = theme_index(theme);
+        match key {
+            SettingsKey::Up => {
+                self.row = self.row.saturating_sub(1);
+                SettingsChange::Nothing
+            }
+            SettingsKey::Down => {
+                self.row = (self.row + 1).min(Self::ROWS - 1);
+                SettingsChange::Nothing
+            }
+            SettingsKey::Escape => SettingsChange::Close,
+            SettingsKey::Enter => match self.row {
+                0 => SettingsChange::ToggleAuto,
+                1 => SettingsChange::Record,
+                _ => SettingsChange::Theme(THEMES[(current + 1) % THEMES.len()].0),
+            },
+            SettingsKey::Left if self.row == 2 && current > 0 => {
+                SettingsChange::Theme(THEMES[current - 1].0)
+            }
+            SettingsKey::Right if self.row == 2 && current + 1 < THEMES.len() => {
+                SettingsChange::Theme(THEMES[current + 1].0)
+            }
+            SettingsKey::Left | SettingsKey::Right => SettingsChange::Nothing,
+        }
+    }
+}
+
+/// The shortcut text for a key pressed while recording, for `shortcut::parse` to judge.
+/// None while only modifiers are down, so the user can keep building the combination.
+pub fn pressed_combo(ctrl: bool, alt: bool, shift: bool, key: u16) -> Option<String> {
+    let name = match key {
+        // Shift, Ctrl, Alt and both Windows keys.
+        0x10..=0x12 | 0x5B | 0x5C | 0xA0..=0xA5 => return None,
+        0x30..=0x39 | 0x41..=0x5A => char::from(key as u8).to_string(),
+        0x70..=0x87 => format!("F{}", key - 0x6F),
+        other => format!("Key{other}"),
+    };
+    let mut parts = Vec::new();
+    if ctrl {
+        parts.push("Ctrl");
+    }
+    if alt {
+        parts.push("Alt");
+    }
+    if shift {
+        parts.push("Shift");
+    }
+    parts.push(&name);
+    Some(parts.join("+"))
+}
+
 /// The only outside links the app opens: Cambridge pages over HTTPS.
 pub fn allowed_link(url: &str) -> bool {
     reqwest::Url::parse(url).is_ok_and(|url| {
@@ -369,6 +468,120 @@ mod tests {
         let failure = FailureView::from_error(&missing, "termnal");
         assert!(!failure.can_retry() && failure.source_url.is_none());
         assert_eq!(failure.suggestions, ["terminal"]);
+    }
+
+    #[test]
+    fn the_settings_page_moves_by_row_and_each_row_has_its_change() {
+        let mut page = SettingsView::default();
+        assert_eq!(page.key(SettingsKey::Up, "system"), SettingsChange::Nothing);
+        assert_eq!(page.row, 0);
+        assert_eq!(
+            page.key(SettingsKey::Enter, "system"),
+            SettingsChange::ToggleAuto
+        );
+        page.key(SettingsKey::Down, "system");
+        assert_eq!(
+            page.key(SettingsKey::Enter, "system"),
+            SettingsChange::Record
+        );
+        page.key(SettingsKey::Down, "system");
+        page.key(SettingsKey::Down, "system");
+        assert_eq!(page.row, 2, "the last row stays selected");
+        assert_eq!(
+            page.key(SettingsKey::Escape, "system"),
+            SettingsChange::Close
+        );
+    }
+
+    #[test]
+    fn the_appearance_row_steps_through_the_choices() {
+        let mut page = SettingsView {
+            row: 2,
+            ..Default::default()
+        };
+        assert_eq!(
+            page.key(SettingsKey::Right, "system"),
+            SettingsChange::Theme("light")
+        );
+        assert_eq!(
+            page.key(SettingsKey::Left, "light"),
+            SettingsChange::Theme("system")
+        );
+        assert_eq!(
+            page.key(SettingsKey::Left, "system"),
+            SettingsChange::Nothing
+        );
+        assert_eq!(
+            page.key(SettingsKey::Right, "dark"),
+            SettingsChange::Nothing
+        );
+        assert_eq!(
+            page.key(SettingsKey::Enter, "dark"),
+            SettingsChange::Theme("system"),
+            "Enter wraps"
+        );
+        page.row = 0;
+        assert_eq!(
+            page.key(SettingsKey::Right, "system"),
+            SettingsChange::Nothing
+        );
+    }
+
+    #[test]
+    fn while_recording_only_escape_does_anything() {
+        let mut page = SettingsView {
+            row: 1,
+            recording: true,
+            notice: None,
+        };
+        for key in [
+            SettingsKey::Up,
+            SettingsKey::Down,
+            SettingsKey::Enter,
+            SettingsKey::Left,
+        ] {
+            assert_eq!(page.key(key, "system"), SettingsChange::Nothing);
+        }
+        assert_eq!(page.row, 1);
+        assert_eq!(
+            page.key(SettingsKey::Escape, "system"),
+            SettingsChange::StopRecording
+        );
+    }
+
+    #[test]
+    fn a_recorded_combination_reads_like_the_settings_file() {
+        assert_eq!(
+            pressed_combo(true, true, false, 0x41).unwrap(),
+            "Ctrl+Alt+A"
+        );
+        assert_eq!(
+            pressed_combo(false, true, true, 0x37).unwrap(),
+            "Alt+Shift+7"
+        );
+        assert_eq!(pressed_combo(true, false, false, 0x7B).unwrap(), "Ctrl+F12");
+        assert_eq!(
+            pressed_combo(true, false, false, 0xBC).unwrap(),
+            "Ctrl+Key188"
+        );
+        for modifier in [0x10, 0x11, 0x12, 0x5B, 0xA2] {
+            assert_eq!(pressed_combo(true, false, false, modifier), None);
+        }
+        // What the parser then makes of them, as 0.2.0 does.
+        assert_eq!(
+            crate::shortcut::parse(&pressed_combo(true, true, false, 0x44).unwrap())
+                .unwrap()
+                .unwrap()
+                .text,
+            "Ctrl+Alt+D"
+        );
+        for refused in [
+            pressed_combo(true, false, false, 0x7B),
+            pressed_combo(false, false, true, 0x44),
+            pressed_combo(true, false, false, 0xBC),
+        ] {
+            assert!(crate::shortcut::parse(&refused.unwrap()).is_err());
+        }
     }
 
     #[test]

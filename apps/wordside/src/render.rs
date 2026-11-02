@@ -1,6 +1,7 @@
 //! Lays the card out with DirectWrite and draws it with Direct2D.
-use crate::card::{Content, Coverage, Sound};
+use crate::card::{Content, Coverage, SettingsChange, SettingsView, Sound, THEMES};
 use crate::presentation::{source_label, PronunciationChip};
+use crate::settings::Settings;
 use windows::{
     core::{w, Result, PCWSTR},
     Win32::Graphics::{
@@ -33,6 +34,8 @@ pub struct Theme {
     muted: u32,
     accent: u32,
     on_accent: u32,
+    /// A change that didn't take, such as a shortcut another program holds.
+    warn: u32,
     row: Rgba,
     line: Rgba,
 }
@@ -44,6 +47,7 @@ pub const DARK: Theme = Theme {
     muted: 0xc3cad3,
     accent: 0x7fd0ff,
     on_accent: 0x10141a,
+    warn: 0xffc48a,
     row: Rgba(0xffffff, 0.11),
     line: Rgba(0xffffff, 0.14),
 };
@@ -54,23 +58,27 @@ pub const LIGHT: Theme = Theme {
     muted: 0x454d57,
     accent: 0x0a5f9f,
     on_accent: 0xffffff,
+    warn: 0x8a3d00,
     row: Rgba(0x000000, 0.07),
     line: Rgba(0x000000, 0.11),
 };
 
 #[derive(Clone, Copy)]
 enum Ink {
-    Ink,
-    Ink2,
+    Strong,
+    Soft,
     Muted,
     Accent,
     OnAccent,
+    Warn,
 }
 
 #[derive(Clone, Copy)]
 enum Fill {
     Row,
     Accent,
+    Muted,
+    OnAccent,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -89,6 +97,16 @@ pub enum Action {
     Retry,
     Open(String),
     Sound(usize),
+    OpenSettings,
+    /// A click on a settings row: select it, then make the change.
+    Settings(usize, SettingsChange),
+}
+
+impl Action {
+    /// Rows tint under the mouse.
+    fn is_row(&self) -> bool {
+        matches!(self, Action::Sense(_) | Action::Settings(..))
+    }
 }
 
 struct Piece {
@@ -121,7 +139,8 @@ pub struct Frame {
     body_h: f32,
     has_foot: bool,
     selected: Option<(f32, f32)>,
-    caret_x: f32,
+    /// Where the input caret goes; None on pages without the input.
+    caret_x: Option<f32>,
 }
 
 impl Frame {
@@ -185,7 +204,7 @@ impl Frame {
         self.hits
             .iter()
             .find(|hit| {
-                matches!(hit.action, Action::Sense(_))
+                hit.action.is_row()
                     && x >= hit.rect.left
                     && x < hit.rect.right
                     && y >= hit.rect.top
@@ -292,8 +311,8 @@ impl Builder<'_> {
         let ink = match sound {
             Sound::Loading | Sound::Playing => Ink::Accent,
             Sound::Failed => Ink::Muted,
-            Sound::Idle if voiced => Ink::Ink,
-            Sound::Idle => Ink::Ink2,
+            Sound::Idle if voiced => Ink::Strong,
+            Sound::Idle => Ink::Soft,
         };
         let (w, h) = self.text(
             Zone::Head,
@@ -356,7 +375,7 @@ impl Builder<'_> {
         primary: bool,
         action: Action,
     ) -> Result<f32> {
-        let ink = if primary { Ink::OnAccent } else { Ink::Ink };
+        let ink = if primary { Ink::OnAccent } else { Ink::Strong };
         let (w, h) = self.text(
             zone,
             label,
@@ -391,6 +410,226 @@ const fn moved(r: D2D_RECT_F, dx: f32, dy: f32) -> D2D_RECT_F {
     rect(r.left + dx, r.top + dy, r.right - r.left, r.bottom - r.top)
 }
 
+/// The settings page in place of the card: a title row, three setting rows, the version.
+pub fn build_settings(
+    dwrite: &IDWriteFactory,
+    view: &SettingsView,
+    settings: &Settings,
+) -> Result<Frame> {
+    let mut b = Builder {
+        dwrite,
+        frame: Frame::default(),
+    };
+    b.text(
+        Zone::Head,
+        "设置",
+        PAD,
+        15.0,
+        200.0,
+        style(17.0, false, Ink::Strong),
+    )?;
+    let text_x = PAD + 6.0;
+    let row_w = WIDTH - 16.0;
+    let right = WIDTH - PAD - 4.0;
+    let mut y = 6.0;
+    // Each row: its top, then the title and the line under it; the control sits on the right.
+    let title = |b: &mut Builder, y: f32, text: &str| -> Result<f32> {
+        Ok(b.text(
+            Zone::Body,
+            text,
+            text_x,
+            y,
+            200.0,
+            style(14.0, true, Ink::Strong),
+        )?
+        .1)
+    };
+    let finish_row =
+        |b: &mut Builder, index: usize, top: f32, bottom: f32, change: SettingsChange| {
+            let row = rect(8.0, top, row_w, bottom - top);
+            if index == view.row {
+                b.shape(
+                    Zone::Body,
+                    rect(12.0, top + 12.0, 3.0, bottom - top - 24.0),
+                    1.5,
+                    Fill::Accent,
+                );
+                b.frame.selected = Some((top, bottom));
+            }
+            b.hit(Zone::Body, row, Action::Settings(index, change));
+        };
+
+    // Automatic lookup, with its switch.
+    let top = y;
+    y += 10.0;
+    let h = title(&mut b, y, "自动划词")?;
+    let (_, line) = b.text(
+        Zone::Body,
+        "选中单词后自动弹出卡片",
+        text_x,
+        y + h + 2.0,
+        240.0,
+        style(13.0, false, Ink::Muted),
+    )?;
+    let middle = y + (h + 2.0 + line) / 2.0;
+    let track = rect(right - 40.0, middle - 11.0, 40.0, 22.0);
+    let on = settings.enabled;
+    b.shape(
+        Zone::Body,
+        track,
+        11.0,
+        if on { Fill::Accent } else { Fill::Row },
+    );
+    let knob_x = if on {
+        track.right - 19.0
+    } else {
+        track.left + 3.0
+    };
+    b.shape(
+        Zone::Body,
+        rect(knob_x, middle - 8.0, 16.0, 16.0),
+        8.0,
+        if on { Fill::OnAccent } else { Fill::Muted },
+    );
+    y += h + 2.0 + line + 10.0;
+    finish_row(&mut b, 0, top, y, SettingsChange::ToggleAuto);
+    y += 2.0;
+
+    // The lookup shortcut: a key chip that records a new one.
+    let top = y;
+    y += 10.0;
+    let h = title(&mut b, y, "查词快捷键")?;
+    let hint = if view.recording {
+        "按下新的组合键，Esc 取消，Backspace 停用"
+    } else if settings.lookup_hotkey.is_empty() {
+        "已停用，按 Enter 重新设置"
+    } else {
+        "任何地方按下即可查词"
+    };
+    let (_, line) = b.text(
+        Zone::Body,
+        hint,
+        text_x,
+        y + h + 2.0,
+        right - 130.0 - text_x,
+        style(13.0, false, Ink::Muted),
+    )?;
+    let chip = if view.recording {
+        "按下组合键…".to_owned()
+    } else if settings.lookup_hotkey.is_empty() {
+        "未设置".to_owned()
+    } else {
+        settings.lookup_hotkey.replace('+', " + ")
+    };
+    let ink = if view.recording {
+        Ink::Accent
+    } else {
+        Ink::Strong
+    };
+    let pieces = b.frame.pieces.len();
+    let (w, ch) = b.text(Zone::Body, &chip, 0.0, 0.0, 200.0, style(13.0, false, ink))?;
+    let chip_rect = rect(
+        right - w - 20.0,
+        y + (h + 2.0 + line) / 2.0 - (ch + 12.0) / 2.0,
+        w + 20.0,
+        ch + 12.0,
+    );
+    b.frame.pieces[pieces].x = chip_rect.left + 10.0;
+    b.frame.pieces[pieces].y = chip_rect.top + 6.0;
+    b.shape(Zone::Body, chip_rect, 8.0, Fill::Row);
+    y += h + 2.0 + line;
+    if let Some(notice) = &view.notice {
+        let (_, nh) = b.text(
+            Zone::Body,
+            notice,
+            text_x,
+            y + 6.0,
+            right - text_x,
+            style(13.0, false, Ink::Warn),
+        )?;
+        y += nh + 6.0;
+    }
+    y += 10.0;
+    finish_row(&mut b, 1, top, y, SettingsChange::Record);
+    y += 2.0;
+
+    // The appearance: three segments; the chosen one filled with the accent.
+    let top = y;
+    y += 10.0;
+    let h = title(&mut b, y, "外观")?;
+    y += h + 8.0;
+    let group = rect(text_x, y, right - text_x, 34.0);
+    b.shape(Zone::Body, group, 10.0, Fill::Row);
+    let segment = (group.right - group.left - 6.0) / THEMES.len() as f32;
+    let current = crate::card::theme_index(&settings.theme);
+    for (index, (id, label)) in THEMES.iter().enumerate() {
+        let cell = rect(
+            group.left + 3.0 + segment * index as f32,
+            y + 3.0,
+            segment,
+            28.0,
+        );
+        let chosen = index == current;
+        if chosen {
+            b.shape(Zone::Body, cell, 8.0, Fill::Accent);
+        }
+        let pieces = b.frame.pieces.len();
+        let (w, th) = b.text(
+            Zone::Body,
+            label,
+            0.0,
+            0.0,
+            segment,
+            style(
+                13.0,
+                chosen,
+                if chosen { Ink::OnAccent } else { Ink::Strong },
+            ),
+        )?;
+        b.frame.pieces[pieces].x = cell.left + (segment - w) / 2.0;
+        b.frame.pieces[pieces].y = cell.top + (28.0 - th) / 2.0;
+        // Pushed before the row, so a click on a segment finds it first.
+        b.hit(
+            Zone::Body,
+            cell,
+            Action::Settings(2, SettingsChange::Theme(id)),
+        );
+    }
+    y += 34.0 + 12.0;
+    finish_row(&mut b, 2, top, y, SettingsChange::Nothing);
+    y += 8.0;
+
+    let (_, h) = b.text(
+        Zone::Body,
+        &format!(
+            "WordSide {} · 词条来自 Cambridge Dictionary",
+            env!("CARGO_PKG_VERSION")
+        ),
+        PAD,
+        y,
+        WIDTH - PAD * 2.0,
+        style(12.0, false, Ink::Muted),
+    )?;
+    y += h + 12.0;
+
+    b.frame.has_foot = true;
+    b.text(
+        Zone::Foot,
+        if view.recording {
+            "Esc 取消   Backspace 停用快捷键"
+        } else {
+            "↑↓ 选择   Enter 修改   Esc 返回"
+        },
+        PAD,
+        9.0,
+        WIDTH - PAD * 2.0,
+        style(12.0, false, Ink::Muted),
+    )?;
+    b.frame.head_h = INPUT_H;
+    b.frame.body_h = y;
+    Ok(b.frame)
+}
+
 pub fn build(
     dwrite: &IDWriteFactory,
     content: &Content,
@@ -423,10 +662,10 @@ pub fn build(
             "输入英文单词，回车查询",
             input_x,
             15.0,
-            WIDTH - input_x - 48.0,
+            WIDTH - input_x - 82.0,
             style(17.0, false, Ink::Muted),
         )?;
-        b.frame.caret_x = input_x - 2.0;
+        b.frame.caret_x = Some(input_x - 2.0);
     } else {
         let (w, _) = b.text(
             Zone::Head,
@@ -434,9 +673,9 @@ pub fn build(
             input_x,
             15.0,
             2000.0,
-            style(17.0, false, Ink::Ink),
+            style(17.0, false, Ink::Strong),
         )?;
-        b.frame.caret_x = (input_x + w).min(WIDTH - 50.0);
+        b.frame.caret_x = Some((input_x + w).min(WIDTH - 84.0));
     }
     let pin_rect = rect(WIDTH - 42.0, 11.0, 32.0, 32.0);
     if pinned {
@@ -451,11 +690,26 @@ pub fn build(
         Style {
             size: 15.0,
             bold: false,
-            ink: if pinned { Ink::Accent } else { Ink::Ink2 },
+            ink: if pinned { Ink::Accent } else { Ink::Soft },
             font: ICON_FONT,
         },
     )?;
     b.hit(Zone::Head, pin_rect, Action::Pin);
+    let gear_rect = rect(WIDTH - 76.0, 11.0, 32.0, 32.0);
+    b.text(
+        Zone::Head,
+        "\u{E713}",
+        WIDTH - 68.0,
+        19.0,
+        20.0,
+        Style {
+            size: 15.0,
+            bold: false,
+            ink: Ink::Soft,
+            font: ICON_FONT,
+        },
+    )?;
+    b.hit(Zone::Head, gear_rect, Action::OpenSettings);
     let mut head = INPUT_H;
     let mut y = 0.0;
 
@@ -482,7 +736,7 @@ pub fn build(
                 PAD,
                 y,
                 width,
-                style(14.0, true, Ink::Ink),
+                style(14.0, true, Ink::Strong),
             )?;
             y += h + 4.0;
             let (_, h) = b.text(
@@ -491,7 +745,7 @@ pub fn build(
                 PAD,
                 y,
                 width,
-                style(13.0, false, Ink::Ink2),
+                style(13.0, false, Ink::Soft),
             )?;
             y += h + 10.0;
             for word in &failure.suggestions {
@@ -502,7 +756,7 @@ pub fn build(
                     PAD + 6.0,
                     y + 8.0,
                     width,
-                    style(14.0, false, Ink::Ink),
+                    style(14.0, false, Ink::Strong),
                 )?;
                 b.hit(Zone::Body, row, Action::Suggestion(word.clone()));
                 y += 38.0;
@@ -533,7 +787,7 @@ pub fn build(
                 PAD,
                 head,
                 width,
-                style(26.0, true, Ink::Ink),
+                style(26.0, true, Ink::Strong),
             )?;
             head += h + 2.0;
             if let Some(origin) = view.origin() {
@@ -625,7 +879,11 @@ pub fn build(
                         x,
                         head,
                         200.0,
-                        style(13.0, current, if current { Ink::Ink } else { Ink::Muted }),
+                        style(
+                            13.0,
+                            current,
+                            if current { Ink::Strong } else { Ink::Muted },
+                        ),
                     )?;
                     if current {
                         b.shape(
@@ -672,7 +930,7 @@ pub fn build(
                         tx,
                         y,
                         tw,
-                        style(15.0, true, Ink::Ink),
+                        style(15.0, true, Ink::Strong),
                     )?;
                     y += h + 2.0;
                 } else if view.coverage == Coverage::Partial {
@@ -700,7 +958,7 @@ pub fn build(
                         tx,
                         y,
                         tw,
-                        style(13.0, false, Ink::Ink2),
+                        style(13.0, false, Ink::Soft),
                     )?;
                     y += h;
                 }
@@ -774,7 +1032,7 @@ pub fn build(
                     PAD,
                     y + 8.0,
                     width,
-                    style(13.0, false, Ink::Ink2),
+                    style(13.0, false, Ink::Soft),
                 )?;
                 y += h + 16.0;
             }
@@ -849,18 +1107,22 @@ pub fn paint(p: Paint) -> Result<()> {
         let muted = brush(theme.muted, 1.0)?;
         let accent = brush(theme.accent, 1.0)?;
         let on_accent = brush(theme.on_accent, 1.0)?;
+        let warn = brush(theme.warn, 1.0)?;
         let row = brush(theme.row.0, theme.row.1)?;
         let line = brush(theme.line.0, theme.line.1)?;
         let ink_of = |value: Ink| match value {
-            Ink::Ink => &ink,
-            Ink::Ink2 => &ink2,
+            Ink::Strong => &ink,
+            Ink::Soft => &ink2,
             Ink::Muted => &muted,
             Ink::Accent => &accent,
             Ink::OnAccent => &on_accent,
+            Ink::Warn => &warn,
         };
         let fill_of = |value: Fill| match value {
             Fill::Row => &row,
             Fill::Accent => &accent,
+            Fill::Muted => &muted,
+            Fill::OnAccent => &on_accent,
         };
 
         target.BeginDraw();
@@ -923,7 +1185,9 @@ pub fn paint(p: Paint) -> Result<()> {
             D2D1_ANTIALIAS_MODE_ALIASED,
         );
         draw(Zone::Head, 0.0);
-        target.FillRectangle(&rect(frame.caret_x, 16.0, 1.5, 22.0), &accent);
+        if let Some(caret_x) = frame.caret_x {
+            target.FillRectangle(&rect(caret_x, 16.0, 1.5, 22.0), &accent);
+        }
         target.PopAxisAlignedClip();
         target.DrawLine(
             Vector2 { X: 0.0, Y: INPUT_H },
