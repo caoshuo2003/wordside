@@ -74,6 +74,9 @@ const CLASS: windows::core::PCWSTR = w!("WordSideCard");
 /// Its existence marks the running copy; signalling it asks that copy to show the card.
 const INSTANCE: windows::core::PCWSTR = w!("Local\\WordSide-local.wordside.dictionary.api-preview");
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
+/// Drives the hovered row's pop-up, which runs for `LIFT_TIME`.
+const LIFT_TIMER: usize = 2;
+const LIFT_TIME: std::time::Duration = std::time::Duration::from_millis(220);
 /// Grayscale contrast for text on glass; Windows' default is 1.0.
 const GLASS_TEXT_CONTRAST: f32 = 1.6;
 
@@ -116,6 +119,8 @@ struct App {
     scroll: f32,
     /// Where the mouse is over the card, for the row tint; None once it leaves.
     mouse: Option<(f32, f32)>,
+    /// The row the mouse is over and when it got there, for its pop-up animation.
+    hover: Option<(i32, Instant)>,
     pinned: bool,
     choice: ThemeChoice,
     dark: bool,
@@ -364,6 +369,9 @@ impl App {
             frame: &self.frame,
             scroll: self.scroll,
             mouse: self.mouse,
+            lift: self.hover.map_or(1.0, |(_, since)| {
+                since.elapsed().as_secs_f32() / LIFT_TIME.as_secs_f32()
+            }),
         });
         if let Err(error) = drawn {
             if error.code() != D2DERR_RECREATE_TARGET {
@@ -1058,6 +1066,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 with_app(|app| {
                     entered = app.mouse.is_none();
                     app.mouse = Some(point);
+                    // A new row under the mouse starts its pop-up; the timer drives the frames.
+                    let row = app
+                        .frame
+                        .hovered_row_top(point.0, point.1, app.scroll)
+                        .map(|top| top as i32);
+                    if row != app.hover.map(|(top, _)| top) {
+                        app.hover = row.map(|top| (top, Instant::now()));
+                        if row.is_some() {
+                            let _ = SetTimer(Some(hwnd), LIFT_TIMER, 15, None);
+                        }
+                    }
                 });
                 if entered {
                     let mut track = TRACKMOUSEEVENT {
@@ -1072,7 +1091,23 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_MOUSELEAVE => {
-                with_app(|app| app.mouse = None);
+                with_app(|app| {
+                    app.mouse = None;
+                    app.hover = None;
+                });
+                invalidate(hwnd);
+                LRESULT(0)
+            }
+            WM_TIMER if wparam.0 == LIFT_TIMER => {
+                let mut running = false;
+                with_app(|app| {
+                    running = app
+                        .hover
+                        .is_some_and(|(_, since)| since.elapsed() < LIFT_TIME);
+                });
+                if !running {
+                    let _ = KillTimer(Some(hwnd), LIFT_TIMER);
+                }
                 invalidate(hwnd);
                 LRESULT(0)
             }
@@ -1391,6 +1426,7 @@ pub fn run() -> Result<()> {
             query: String::new(),
             scroll: 0.0,
             mouse: None,
+            hover: None,
             pinned: false,
             choice,
             dark: true,

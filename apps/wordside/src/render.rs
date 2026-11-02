@@ -99,9 +99,9 @@ pub const LIGHT: Theme = Theme {
     warn: 0x8a3d00,
     row: Rgba(0x000000, 0.07),
     line: Rgba(0x000000, 0.11),
-    raised: Rgba(0xffffff, 0.86),
-    edge: Rgba(0xffffff, 1.0),
-    shadow: Rgba(0x14233c, 0.022),
+    raised: Rgba(0xffffff, 0.22),
+    edge: Rgba(0xffffff, 0.85),
+    shadow: Rgba(0x14233c, 0.03),
 };
 
 #[derive(Clone, Copy)]
@@ -238,6 +238,13 @@ impl Frame {
             })
             .map(|hit| hit.action.clone())
     }
+    /// The top of the definition or settings row under the mouse, to tell when it changes.
+    pub fn hovered_row_top(&self, x: f32, y: f32, scroll: f32) -> Option<f32> {
+        self.hovered(x, y, scroll)
+            .filter(|(zone, _)| *zone == Zone::Body)
+            .map(|(_, r)| r.top)
+    }
+
     /// The row or reading under the mouse, in its zone's coordinates.
     fn hovered(&self, x: f32, y: f32, scroll: f32) -> Option<(Zone, D2D_RECT_F)> {
         let foot_top = self.head_h + self.visible_body();
@@ -1159,6 +1166,17 @@ pub struct Paint<'a> {
     pub scroll: f32,
     /// The mouse position in the card, while it is over the card.
     pub mouse: Option<(f32, f32)>,
+    /// How far the hovered row's pop-up has run, 0 to 1.
+    pub lift: f32,
+}
+
+/// The hovered row rises this far, text and all.
+const LIFT_PX: f32 = 3.0;
+
+/// Rises past the top a little and settles back, like a notification popping up.
+fn pop(t: f32) -> f32 {
+    let (c1, t) = (1.4, t.clamp(0.0, 1.0) - 1.0);
+    1.0 + (c1 + 1.0) * t * t * t + c1 * t * t
 }
 
 pub fn paint(p: Paint) -> Result<()> {
@@ -1169,8 +1187,21 @@ pub fn paint(p: Paint) -> Result<()> {
         frame,
         scroll,
         mouse,
+        lift,
     } = p;
     let hovered = mouse.and_then(|(x, y)| frame.hovered(x, y, scroll));
+    let rise = pop(lift);
+    let lifted_row = hovered
+        .filter(|(zone, _)| *zone == Zone::Body)
+        .map(|(_, r)| r);
+    // Whatever belongs to the hovered row (text, bar, tag) rises with its tile.
+    let raised_by = |zone: Zone, y: f32| {
+        if zone == Zone::Body && lifted_row.is_some_and(|r| y >= r.top && y < r.bottom) {
+            -LIFT_PX * rise
+        } else {
+            0.0
+        }
+    };
     unsafe {
         let brush = |rgb: u32, a: f32| target.CreateSolidColorBrush(&color(rgb, a), None);
         let ink = brush(theme.ink, 1.0)?;
@@ -1232,10 +1263,11 @@ pub fn paint(p: Paint) -> Result<()> {
                     // A row under the mouse floats up: lifted a pixel over a wide, soft
                     // shadow, a brighter glass tile, and a rim of light strongest at the top.
                     let radius = 10.0;
-                    let r = moved(r, 0.0, -1.0);
+                    let r = moved(r, 0.0, -LIFT_PX * rise);
                     for step in 0..7 {
                         let grow = step as f32 * 1.4;
-                        let drop = 2.0 + step as f32 * 1.1;
+                        // The shadow falls further as the row rises.
+                        let drop = (2.0 + step as f32 * 1.1) * (0.4 + 0.6 * rise);
                         target.FillRoundedRectangle(
                             &D2D1_ROUNDED_RECT {
                                 rect: rect(
@@ -1306,9 +1338,7 @@ pub fn paint(p: Paint) -> Result<()> {
                 }
             }
             for shape in frame.shapes.iter().filter(|s| s.zone == zone) {
-                let mut r = shape.rect;
-                r.top += dy;
-                r.bottom += dy;
+                let r = moved(shape.rect, 0.0, dy + raised_by(zone, shape.rect.top));
                 target.FillRoundedRectangle(
                     &D2D1_ROUNDED_RECT {
                         rect: r,
@@ -1319,7 +1349,7 @@ pub fn paint(p: Paint) -> Result<()> {
                 );
             }
             for piece in frame.pieces.iter().filter(|p| p.zone == zone) {
-                let y = piece.y + dy;
+                let y = piece.y + dy + raised_by(zone, piece.y);
                 if zone == Zone::Body && (y > foot_top || y < body_top - 2000.0) {
                     continue;
                 }
