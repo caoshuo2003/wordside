@@ -93,7 +93,20 @@ cargo build --manifest-path apps/wordside/Cargo.toml --release
 .\tools\check-wordside.ps1 -Exe apps/wordside/target/release/wordside.exe -Runtime
 ```
 
-- `cargo test` 不操作桌面、不连网，也不读写真实设置；有一个计时测试在机器很忙时偶尔失败，CI 会单独重试它。
+- `cargo test` 不操作桌面、不连网，也不读写真实设置或系统剪贴板；有一个计时测试在机器很忙时偶尔失败，CI 会单独重试它。
+- 取词层里会开真实窗口的夹具标了 `#[ignore]`，在不被打扰的桌面上手动跑。它们会弹出并很快关掉几个小窗口，不碰系统剪贴板（剪贴板测试用私有窗口站）：
+
+  ```powershell
+  cargo test --manifest-path apps/wordside/Cargo.toml -- --ignored --exact `
+    capture::windows_text::tests::plain_rename_edit_keeps_only_selected_word `
+    capture::windows_text::tests::ordinary_edit_unicode_filter_password_and_long_offsets `
+    capture::windows_text::tests::unresponsive_native_edit_times_out_then_recovers `
+    capture::windows_text::tests::native_text_controls_selection_owner_password_and_filtering `
+    capture::probe::tests::hung_helper_is_reaped_and_next_real_selection_recovers `
+    capture::windows_copy::isolated_tests::native_backup_round_trip_uses_private_window_station
+  ```
+
+  不要直接跑 `--ignored`：`helper_process`、`fixture_process`、`private_clipboard_process` 是给上面这些测试启动的子进程入口，单独运行会一直等输入。
 - 第三方许可要在正式编译前生成，否则 exe 里只有一行提示，`check-wordside.ps1` 会判为失败。
 - `check-wordside.ps1 -Runtime` 用临时设置目录启动程序，测托盘待命时的内存和空闲 CPU；不加 `-Runtime` 只做 CI 也能做的静态检查。
 - 编译时 `build.rs` 用 Windows SDK 的 `rc.exe` 嵌入图标；没有 SDK 也能编译，只是 exe 没有图标。改了 `src/icon.rs` 的图形后用 `wordside.exe --export-icon apps\wordside\assets\wordside.ico` 重新导出。

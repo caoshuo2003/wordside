@@ -987,6 +987,7 @@ pub(crate) mod tests {
         drop(fixture);
     }
     #[test]
+    #[ignore = "live fixture: opens native windows; run by hand"]
     fn plain_rename_edit_keeps_only_selected_word() {
         unsafe {
             let fixture = ExternalFixture::new();
@@ -1074,6 +1075,7 @@ pub(crate) mod tests {
         }
     }
     #[test]
+    #[ignore = "live fixture: opens native windows; run by hand"]
     fn ordinary_edit_unicode_filter_password_and_long_offsets() {
         unsafe {
             let fixture = ExternalFixture::new();
@@ -1143,6 +1145,7 @@ pub(crate) mod tests {
         }
     }
     #[test]
+    #[ignore = "live fixture: opens native windows; run by hand"]
     fn unresponsive_native_edit_times_out_then_recovers() {
         let mut fixture = ExternalFixture::new();
         fixture.pause();
@@ -1164,6 +1167,7 @@ pub(crate) mod tests {
         );
     }
     #[test]
+    #[ignore = "live fixture: opens native windows; run by hand"]
     fn native_text_controls_selection_owner_password_and_filtering() {
         unsafe {
             let clipboard = GetClipboardSequenceNumber();

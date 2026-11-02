@@ -121,29 +121,9 @@ jobs:
           # budget and fails now and then on a busy machine. Everything else must pass first
           # time; it gets up to three tries.
           $timing = 'dictionary::tests::optional_deadline_retains_404_within_the_remaining_total_budget'
-          cargo test --manifest-path apps/wordside/Cargo.toml --locked -- --skip $timing --skip capture:: --skip dismissal::
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          # Selection reading: the same safe list as the 0.2.0 job above. The rest of
-          # capture:: drives real windows and the clipboard and is only run by hand.
-          $filters = @(
-            'capture::shortcut::',
-            'capture::tests::',
-            'capture::copy_policy::',
-            'capture::timing::',
-            'capture::windows_copy::tests::',
-            'capture::windows_copy::ole::tests::',
-            'capture::input::tests::',
-            'capture::windows_text::semantics_tests::',
-            'capture::diagnostics::tests::',
-            'capture::hotkey::tests::',
-            'capture::windows::tests::',
-            'capture::compatibility::tests::',
-            'capture::selection::tests::',
-            'capture::probe::protocol_tests::',
-            'capture::windows_edit::tests::',
-            'dismissal::tests::'
-          )
-          cargo test --manifest-path apps/wordside/Cargo.toml --locked -- @filters
+          # The selection fixtures that open real windows are #[ignore]d, so this needs no
+          # filter list.
+          cargo test --manifest-path apps/wordside/Cargo.toml --locked -- --skip $timing
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           foreach ($try in 1..3) {
             cargo test --manifest-path apps/wordside/Cargo.toml --locked -- --exact $timing

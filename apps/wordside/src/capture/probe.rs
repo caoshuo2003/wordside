@@ -956,6 +956,7 @@ mod tests {
         });
     }
     #[test]
+    #[ignore = "live fixture: opens native windows and a helper process; run by hand"]
     fn hung_helper_is_reaped_and_next_real_selection_recovers() {
         let fixture = ExternalFixture::new();
         let (worker, answers) = Worker::start(
