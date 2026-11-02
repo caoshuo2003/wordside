@@ -14,6 +14,7 @@ mod render;
 mod selection_input;
 mod service;
 mod settings;
+mod tray;
 
 fn main() -> windows::core::Result<()> {
     app::run()

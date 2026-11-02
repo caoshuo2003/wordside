@@ -7,13 +7,18 @@ use crate::{
     render::{self, Action, Frame, Theme, DARK, INPUT_H, LIGHT, WIDTH},
     selection_input::selected_word,
     service::Service,
-    settings,
+    settings::{self, Settings},
+    tray::{self, Command, WM_TRAY},
 };
 use serde_json::json;
 use std::{
     cell::RefCell,
     collections::HashMap,
-    sync::{Arc, Mutex, OnceLock},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, Mutex, OnceLock,
+    },
     time::Instant,
 };
 use windows::{
@@ -52,8 +57,17 @@ const WM_RESULT: u32 = WM_APP + 1;
 const WM_CLIP: u32 = WM_APP + 2;
 /// The player ended (lparam 0) or failed (lparam 1); wparam is the sound's serial.
 const WM_SOUND: u32 = WM_APP + 3;
+/// Another launch asks the running copy to show the card.
+const WM_SHOW: u32 = WM_APP + 5;
 const CF_UNICODETEXT: u32 = 13;
 const SHOW_HOTKEY: i32 = 1;
+/// The temporary shortcut registered below, until capture lands in N3.
+const SHOW_HOTKEY_LABEL: &str = "Ctrl+Alt+A";
+const CLASS: windows::core::PCWSTR = w!("WordSideCard");
+/// Per session, named after the app identifier so it never collides with other apps.
+/// Its existence marks the running copy; signalling it asks that copy to show the card.
+const INSTANCE: windows::core::PCWSTR = w!("Local\\WordSide-local.wordside.dictionary.api-preview");
+static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 
 type Answer = (u64, String, Result2);
 type Result2 = std::result::Result<Entry, LookupError>;
@@ -108,6 +122,8 @@ struct App {
     player: Option<Player>,
     /// Sounds of the current entry, so replaying doesn't download again.
     clips: HashMap<String, Vec<u8>>,
+    settings: Settings,
+    settings_path: Option<PathBuf>,
     report_paint: Option<Instant>,
 }
 
@@ -560,6 +576,20 @@ impl App {
         }
     }
 
+    /// Changes only once the file is saved, so the menu never shows a state that would be lost.
+    fn toggle_auto(&mut self) {
+        let mut next = self.settings.clone();
+        next.enabled = !next.enabled;
+        let saved = self
+            .settings_path
+            .as_deref()
+            .is_some_and(|path| settings::save(path, &next).is_ok());
+        if saved {
+            self.settings = next;
+            tray::update(self.hwnd, self.settings.enabled);
+        }
+    }
+
     fn show(&mut self) {
         self.rebuild();
         self.fit();
@@ -772,6 +802,42 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 with_app(|app| app.show());
                 LRESULT(0)
             }
+            WM_SHOW => {
+                with_app(|app| app.show());
+                LRESULT(0)
+            }
+            WM_TRAY => {
+                match (lparam.0 as u32) & 0xffff {
+                    WM_LBUTTONUP => {
+                        with_app(|app| app.show());
+                    }
+                    WM_RBUTTONUP => {
+                        let mut enabled = false;
+                        with_app(|app| enabled = app.settings.enabled);
+                        // The menu runs its own message loop, so the app is not borrowed here.
+                        match tray::menu(hwnd, enabled, SHOW_HOTKEY_LABEL) {
+                            Some(Command::ToggleAuto) => {
+                                with_app(|app| app.toggle_auto());
+                            }
+                            Some(Command::Lookup) => {
+                                with_app(|app| app.show());
+                            }
+                            Some(Command::Quit) => {
+                                let _ = DestroyWindow(hwnd);
+                            }
+                            Some(Command::Settings) | None => {}
+                        }
+                    }
+                    _ => {}
+                }
+                LRESULT(0)
+            }
+            _ if msg != 0 && msg == TASKBAR_CREATED.load(Ordering::Relaxed) => {
+                let mut enabled = false;
+                with_app(|app| enabled = app.settings.enabled);
+                tray::add(hwnd, enabled);
+                LRESULT(0)
+            }
             WM_SETTINGCHANGE => {
                 update_and_fit(|app| {
                     app.refresh_theme();
@@ -792,6 +858,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_DESTROY => {
+                tray::remove(hwnd);
                 PostQuitMessage(0);
                 LRESULT(0)
             }
@@ -827,12 +894,62 @@ fn content_from(payload: &serde_json::Value) -> Content {
     }
 }
 
+enum Instance {
+    /// This copy runs; the event is signalled whenever the app is launched again.
+    First(HANDLE),
+    /// Another copy runs and has been asked to show the card.
+    Again,
+    /// A development run, which may sit beside the real app.
+    Development,
+}
+
+/// A named event rather than a window search, which fails across sandboxes and desktops.
+fn claim_instance() -> Instance {
+    unsafe {
+        let Ok(event) = CreateEventW(None, false, false, INSTANCE) else {
+            return Instance::Development;
+        };
+        if GetLastError() != ERROR_ALREADY_EXISTS {
+            return Instance::First(event);
+        }
+        // This launch came from the user, so it may hand the foreground to the running copy.
+        let _ = AllowSetForegroundWindow(ASFW_ANY);
+        let _ = SetEvent(event);
+        Instance::Again
+    }
+}
+
+/// Waits on the event for the life of the process and asks the window to show the card.
+fn wait_for_launches(event: HANDLE, hwnd: HWND) {
+    let (event, hwnd) = (event.0 as isize, hwnd.0 as isize);
+    std::thread::spawn(move || loop {
+        unsafe {
+            if WaitForSingleObject(HANDLE(event as *mut _), INFINITE) != WAIT_OBJECT_0 {
+                break;
+            }
+            let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_SHOW, WPARAM(0), LPARAM(0));
+        }
+    });
+}
+
 pub fn run() -> Result<()> {
     let start = Instant::now();
+    // Development runs show saved data and may sit beside the real app.
+    let development = ["--payload", "--parse", "--first-paint"]
+        .into_iter()
+        .any(flag);
+    let launch = if development {
+        Instance::Development
+    } else {
+        claim_instance()
+    };
+    if let Instance::Again = launch {
+        return Ok(());
+    }
     unsafe {
         let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         let instance = GetModuleHandleW(None)?;
-        let class = w!("WordSideCard");
+        let class = CLASS;
         RegisterClassW(&WNDCLASSW {
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
@@ -871,9 +988,16 @@ pub fn run() -> Result<()> {
             MOD_ALT | MOD_CONTROL,
             u32::from(b'A'),
         );
-        let preferences = settings::path()
-            .map(|path| settings::load(&path))
+        let settings_path = settings::path();
+        let preferences = settings_path
+            .as_deref()
+            .map(settings::load)
             .unwrap_or_default();
+        TASKBAR_CREATED.store(tray::taskbar_created(), Ordering::Relaxed);
+        tray::add(hwnd, preferences.enabled);
+        if let Instance::First(event) = launch {
+            wait_for_launches(event, hwnd);
+        }
         let choice = if flag("--light") {
             ThemeChoice::Light
         } else if flag("--dark") {
@@ -907,6 +1031,8 @@ pub fn run() -> Result<()> {
             sound_task: None,
             player: None,
             clips: HashMap::new(),
+            settings: preferences,
+            settings_path,
             report_paint: flag("--first-paint").then_some(start),
         };
         app.refresh_theme();
@@ -917,6 +1043,8 @@ pub fn run() -> Result<()> {
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
+        // `--first-paint` quits without destroying the window; don't leave a dead icon behind.
+        tray::remove(hwnd);
     }
     Ok(())
 }

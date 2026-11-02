@@ -95,8 +95,6 @@ pub fn load(path: &Path) -> Settings {
 
 /// Writes a temporary file beside the target and renames it over, so a crash mid-write
 /// leaves the previous settings intact.
-// The settings page, later in this milestone, is the first caller.
-#[allow(dead_code)]
 pub fn save(path: &Path, settings: &Settings) -> io::Result<()> {
     let folder = path
         .parent()
