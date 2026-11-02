@@ -4,12 +4,15 @@
 
 ## 0.3.0 起：原生程序 apps/wordside
 
-0.3.0 起发布的是 `apps/wordside` 的单个 exe，没有安装包。步骤：
+0.3.0 起发布的是 `apps/wordside` 的单个 exe 和它的安装版。步骤：
 
 1. 改 `apps/wordside/Cargo.toml` 与 `Cargo.lock` 中 `wordside` 的版本（exe 文件属性里的版本由 `build.rs` 从这里取），更新 CHANGELOG、用户文档和 `docs/releases/v<版本>.md`。
 2. 按 [开发指南](DEVELOPMENT.md#030-原生卡片appswordside) 生成第三方许可、正式编译，并运行 `check-wordside.ps1`。
-3. 成品放进忽略的 `release/v<版本>/`：`WordSide_<版本>.exe`、`THIRD-PARTY-LICENSES_<版本>.txt`，以及包含这两个文件和使用说明的 `WordSide_<版本>-portable.zip`。
-4. 合入、打标签、发布同下面第 3、4 节，附件换成上面三个文件。
+3. 用 `tools/build-installer.ps1 -Exe <exe> -Licenses <许可> -OutDir release/v<版本>` 生成安装版（需要 NSIS 的 `makensis`，例如 `scoop install extras/nsis`）。安装版只装给当前用户，沿用 0.2.0 的安装目录和卸载项，会先静默卸载已安装的 0.2.0。
+4. 成品放进忽略的 `release/v<版本>/`：`WordSide_<版本>_x64-setup.exe`、`WordSide_<版本>.exe`、`THIRD-PARTY-LICENSES_<版本>.txt`，以及包含 exe、许可和使用说明的 `WordSide_<版本>-portable.zip`。
+5. 合入、打标签、发布同下面第 3、4 节，附件换成上面四个文件。
+
+0.3.0 是一次例外：同一天先发布了一版，随后修好剪贴板取词、1080p 文字和安装版，维护者决定把修好的这一版作为改版后第一个可用的 0.3.0，把 `v0.3.0` 标签移到新的提交并替换了附件。以后照常：已发布的标签不移动。
 
 下面第 1、2 节是 0.2.0（`desktop/`，Tauri）的流程，退役前保留。
 
