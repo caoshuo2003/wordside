@@ -775,7 +775,28 @@ impl App {
         let mut next = self.settings.clone();
         next.enabled = !next.enabled;
         if self.save(next) {
-            tray::update(self.hwnd, self.settings.enabled);
+            tray::update(self.hwnd, self.tray_status());
+        }
+    }
+
+    fn tray_status(&self) -> tray::Status<'_> {
+        let hotkey = self.settings.lookup_hotkey.as_str();
+        tray::Status {
+            enabled: self.settings.enabled,
+            blocked_hotkey: (!self.hotkey_active && !hotkey.is_empty()).then_some(hotkey),
+        }
+    }
+
+    /// Another program may hold the saved shortcut. Say so where it can be seen: until N3's
+    /// keyboard hook takes over, a plain `RegisterHotKey` cannot share a combination.
+    fn report_blocked_hotkey(&self) {
+        if let Some(hotkey) = self.tray_status().blocked_hotkey {
+            tray::warn(
+                self.hwnd,
+                self.tray_status(),
+                "WordSide 的快捷键不可用",
+                &format!("{hotkey} 已被其他程序占用（比如截图工具）。点这里换一个组合，也可以先左键点托盘图标查词。"),
+            );
         }
     }
 
@@ -841,6 +862,8 @@ impl App {
         if let Some(page) = &mut self.page {
             page.recording = false;
         }
+        // The tooltip stops naming a blocked shortcut once a working one is saved.
+        tray::update(self.hwnd, self.tray_status());
     }
 
     /// A key while recording. The new shortcut replaces the old one only once it is both
@@ -1268,6 +1291,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     WM_LBUTTONUP => {
                         with_app(|app| app.show());
                     }
+                    // The blocked-shortcut notification: straight to the shortcut setting.
+                    tray::NIN_BALLOONUSERCLICK => {
+                        update_and_fit(|app| {
+                            app.open_settings();
+                            if let Some(page) = &mut app.page {
+                                page.row = 1;
+                            }
+                            app.rebuild();
+                            app.show();
+                        });
+                    }
                     WM_RBUTTONUP => {
                         let (mut enabled, mut hotkey) = (false, String::new());
                         with_app(|app| {
@@ -1301,9 +1335,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             _ if msg != 0 && msg == TASKBAR_CREATED.load(Ordering::Relaxed) => {
-                let mut enabled = false;
-                with_app(|app| enabled = app.settings.enabled);
-                tray::add(hwnd, enabled);
+                with_app(|app| {
+                    tray::add(hwnd, app.tray_status());
+                });
                 LRESULT(0)
             }
             WM_SETTINGCHANGE => {
@@ -1311,7 +1345,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     app.refresh_theme();
                     app.rebuild();
                     // The taskbar may have switched between light and dark.
-                    tray::update(app.hwnd, app.settings.enabled);
+                    tray::update(app.hwnd, app.tray_status());
                 });
                 LRESULT(0)
             }
@@ -1462,7 +1496,6 @@ pub fn run() -> Result<()> {
             .unwrap_or_default();
         let hotkey_active = register_hotkey(hwnd, &preferences.lookup_hotkey);
         TASKBAR_CREATED.store(tray::taskbar_created(), Ordering::Relaxed);
-        tray::add(hwnd, preferences.enabled);
         if let Instance::First(event) = launch {
             wait_for_launches(event, hwnd);
         }
@@ -1509,6 +1542,10 @@ pub fn run() -> Result<()> {
         };
         app.refresh_theme();
         APP.with(|cell| *cell.borrow_mut() = Some(app));
+        with_app(|app| {
+            tray::add(app.hwnd, app.tray_status());
+            app.report_blocked_hotkey();
+        });
         // A normal start waits in the tray; the shortcut, the tray or another launch shows
         // the card. Development runs show their data right away.
         if development {
