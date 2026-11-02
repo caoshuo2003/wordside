@@ -121,6 +121,8 @@ struct App {
     mouse: Option<(f32, f32)>,
     /// The row the mouse is over and when it got there, for its pop-up animation.
     hover: Option<(i32, Instant)>,
+    /// The keyboard moved the selection last, so the selected row floats, not the hovered one.
+    keyboard: bool,
     pinned: bool,
     choice: ThemeChoice,
     dark: bool,
@@ -372,6 +374,7 @@ impl App {
             lift: self.hover.map_or(1.0, |(_, since)| {
                 since.elapsed().as_secs_f32() / LIFT_TIME.as_secs_f32()
             }),
+            keyboard: self.keyboard,
         });
         if let Err(error) = drawn {
             if error.code() != D2DERR_RECREATE_TARGET {
@@ -653,6 +656,25 @@ impl App {
         let line = text.lines().next().unwrap_or("").trim();
         self.query.extend(line.chars().take(100));
         self.rebuild();
+    }
+
+    /// After ↑↓ or Tab the selected row floats up, so the keyboard shows where it is without
+    /// a mark of its own; it pops again whenever it lands on another row.
+    fn keyboard_moved(&mut self, key: u16) {
+        if ![VK_UP.0, VK_DOWN.0, VK_TAB.0].contains(&key) {
+            return;
+        }
+        self.keyboard = true;
+        let top = self.frame.selected_top().map(|top| top as i32);
+        if top != self.hover.map(|(row, _)| row) {
+            self.hover = top.map(|row| (row, Instant::now()));
+            unsafe {
+                let _ = SetTimer(Some(self.hwnd), LIFT_TIMER, 15, None);
+            }
+        }
+        unsafe {
+            let _ = InvalidateRect(Some(self.hwnd), None, false);
+        }
     }
 
     /// Hiding gives everything back: no render target, no layouts, trimmed working set.
@@ -1065,7 +1087,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let mut entered = false;
                 with_app(|app| {
                     entered = app.mouse.is_none();
+                    // Windows also sends this when the card changes under a still mouse.
+                    if app.mouse == Some(point) {
+                        return;
+                    }
                     app.mouse = Some(point);
+                    if app.keyboard {
+                        app.keyboard = false;
+                        app.hover = None;
+                    }
                     // A new row under the mouse starts its pop-up; the timer drives the frames.
                     let row = app
                         .frame
@@ -1141,6 +1171,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_KEYDOWN => {
                 let key = wparam.0 as u16;
                 update_and_fit(|app| app.key(key));
+                with_app(|app| app.keyboard_moved(key));
                 LRESULT(0)
             }
             WM_CONTEXTMENU => {
@@ -1427,6 +1458,7 @@ pub fn run() -> Result<()> {
             scroll: 0.0,
             mouse: None,
             hover: None,
+            keyboard: false,
             pinned: false,
             choice,
             dark: true,

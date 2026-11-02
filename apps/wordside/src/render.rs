@@ -238,6 +238,11 @@ impl Frame {
             })
             .map(|hit| hit.action.clone())
     }
+    /// The selected row's top, to tell when the keyboard moves it.
+    pub fn selected_top(&self) -> Option<f32> {
+        self.selected.map(|(top, _)| top)
+    }
+
     /// The top of the definition or settings row under the mouse, to tell when it changes.
     pub fn hovered_row_top(&self, x: f32, y: f32, scroll: f32) -> Option<f32> {
         self.hovered(x, y, scroll)
@@ -527,12 +532,6 @@ pub fn build_settings(
         |b: &mut Builder, index: usize, top: f32, bottom: f32, change: SettingsChange| {
             let row = rect(8.0, top, row_w, bottom - top);
             if index == view.row {
-                b.shape(
-                    Zone::Body,
-                    rect(12.0, top + 12.0, 3.0, bottom - top - 24.0),
-                    1.5,
-                    Fill::Accent,
-                );
                 b.frame.selected = Some((top, bottom));
             }
             b.hit(Zone::Body, row, Action::Settings(index, change));
@@ -1092,15 +1091,9 @@ pub fn build(
                 }
                 y += 8.0;
                 let row = rect(8.0, top, row_w, y - top);
-                // The selected row gets its accent bar; whichever row the mouse is over
-                // floats up as a glass tile, drawn at paint time.
+                // No mark of its own: the row under the mouse, or the selected one while
+                // the keyboard is in use, floats up at paint time.
                 if index == view.selected {
-                    b.shape(
-                        Zone::Body,
-                        rect(13.0, top + 11.0, 3.0, y - top - 22.0),
-                        1.5,
-                        Fill::Accent,
-                    );
                     b.frame.selected = Some((top, y));
                 }
                 b.hit(Zone::Body, row, Action::Sense(index));
@@ -1168,6 +1161,8 @@ pub struct Paint<'a> {
     pub mouse: Option<(f32, f32)>,
     /// How far the hovered row's pop-up has run, 0 to 1.
     pub lift: f32,
+    /// The keyboard moved last: the selected row floats instead of the one under the mouse.
+    pub keyboard: bool,
 }
 
 /// The hovered row rises this far, text and all.
@@ -1188,8 +1183,15 @@ pub fn paint(p: Paint) -> Result<()> {
         scroll,
         mouse,
         lift,
+        keyboard,
     } = p;
-    let hovered = mouse.and_then(|(x, y)| frame.hovered(x, y, scroll));
+    let hovered = if keyboard {
+        frame
+            .selected
+            .map(|(top, bottom)| (Zone::Body, rect(8.0, top, WIDTH - 16.0, bottom - top)))
+    } else {
+        mouse.and_then(|(x, y)| frame.hovered(x, y, scroll))
+    };
     let rise = pop(lift);
     let lifted_row = hovered
         .filter(|(zone, _)| *zone == Zone::Body)
