@@ -469,14 +469,6 @@ fn enumerate_formats() -> Result<Vec<u32>, BackupFailure> {
         ids.push(id);
     }
 }
-// Windows synthesizes each metafile format from the other.
-fn metafile_twin(id: u32) -> Option<u32> {
-    match id {
-        3 => Some(14),
-        14 => Some(3),
-        _ => None,
-    }
-}
 #[path = "windows_ole.rs"]
 mod ole;
 fn snapshot_format(id: u32, source: Handle, bytes: &mut usize) -> Result<Format, BackupFailure> {
@@ -748,10 +740,13 @@ fn coherent_snapshot<T>(
         Err(failure(BackupStage::SourceChanged, None, false))
     }
 }
+// A format the Win32 clipboard has no data for: OLE may still offer it, or show that
+// nobody can (see the OLE pass). GetLastError is often stale here; only access denied
+// is a real answer.
 fn needs_ole_retry(error: &BackupFailure) -> bool {
     error.stage == BackupStage::ReadFormat
-        && error.format_id.is_some_and(|id| id >= 0xc000)
-        && error.win32_error.is_none()
+        && error.format_id.is_some()
+        && error.win32_error != Some(5)
         && error.hresult.is_none()
 }
 impl Backup {
@@ -783,8 +778,9 @@ impl Backup {
             let paths = ids.contains(&CF_HDROP);
             let mut bytes = 0;
             let mut ole_formats = 0;
-            let mut empty: Vec<u32> = Vec::new();
-            let mut formats = if force_ole || ids.iter().copied().any(ole_transport) {
+            let mut rendered: Vec<u32> = Vec::new();
+            let ole_pass = force_ole || ids.iter().copied().any(ole_transport);
+            let mut formats = if ole_pass {
                 drop(lock); // OLE must open the clipboard itself, never under our lock.
                 let snapshot = ole::snapshot(before, original_owner, paths, &mut bytes)?;
                 lock = ClipboardLock::open(owner.0, Duration::from_millis(80))
@@ -798,7 +794,7 @@ impl Backup {
                     return Err(failure(BackupStage::UnsupportedFormat, Some(id), false));
                 }
                 ole_formats = snapshot.saved.len() + snapshot.rendered.len();
-                empty = snapshot.empty;
+                rendered = snapshot.rendered;
                 snapshot.saved
             } else {
                 Vec::new()
@@ -814,12 +810,15 @@ impl Backup {
                     SetLastError(0);
                 }
                 let source = unsafe { GetClipboardData(id) };
-                // An empty declared metafile, or the twin Windows makes from it, has
-                // nothing any application could paste; leaving it out loses nothing.
+                // No data here and none through OLE (declared empty, the metafile twin
+                // Windows makes from an empty one, or never offered by OLE at all): no
+                // application can paste it, so leaving it out loses nothing. Access
+                // denied is not emptiness, and OLE promised data for the rendered ones.
                 if source == 0
-                    && empty
-                        .iter()
-                        .any(|&declared| declared == id || metafile_twin(declared) == Some(id))
+                    && ole_pass
+                    && unsafe { GetLastError() } != 5
+                    && !rendered.contains(&id)
+                    && !formats.iter().any(|format| format.id == id)
                 {
                     continue;
                 }

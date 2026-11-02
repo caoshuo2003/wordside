@@ -116,6 +116,10 @@ unsafe extern "system" fn get(
         });
         return HRESULT(0);
     }
+    // "none" is a declared format the Win32 clipboard has no data for.
+    if bytes == b"none" {
+        return HRESULT(0x800401d3u32 as i32);
+    }
     if (*format).tymed != 1 {
         return HRESULT(0x80040069u32 as i32);
     }
@@ -316,9 +320,17 @@ fn stream_storage_and_metafiles_are_read_from_the_win32_rendering_not_refused() 
     let snapshot = materialize(&source, false, &mut 0, || true).unwrap();
     assert!(snapshot.rendered.is_empty());
     assert_eq!(snapshot.empty, [3, 14]);
-    assert!(undeliverable(&Error::from_hresult(HRESULT(
-        0x800401d3u32 as i32
-    ))));
+    // So is a marker like EnterpriseDataProtectionId with nothing behind it; the
+    // text beside it is still read.
+    let marker = custom("EnterpriseDataProtectionId");
+    let source = provider(vec![
+        (format(marker), b"none".to_vec()),
+        (format(13), vec![65, 0, 0, 0]),
+    ]);
+    let snapshot = materialize(&source, false, &mut 0, || true).unwrap();
+    assert_eq!(snapshot.empty, [u32::from(marker)]);
+    let ids: Vec<_> = snapshot.saved.iter().map(|value| value.id).collect();
+    assert_eq!(ids, [13]);
     // Any other failure may be passing, so the backup is refused as before.
     let source = provider(vec![(
         FORMATETC {

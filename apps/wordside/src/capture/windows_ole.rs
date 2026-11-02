@@ -67,9 +67,10 @@ fn static_format(format: &FORMATETC) -> bool {
         && format.cfFormat != 0
         && (format.tymed & medium_for(u32::from(format.cfFormat)) != 0 || rendered_natively(format))
 }
-// Some sources (.NET WinForms among them) declare a metafile they cannot draw: OLE
-// reports no such medium and the Win32 clipboard has no data, so no application can
-// paste it. Only that answer, for a metafile, makes a declared format count as empty.
+// Some sources declare a format with nothing behind it (.NET WinForms with a metafile
+// it cannot draw; Windows' EnterpriseDataProtectionId marker): OLE reports no such
+// data and the Win32 clipboard returns none, so no application can paste it. Only
+// these answers make a declared format count as empty.
 fn undeliverable(error: &Error) -> bool {
     matches!(
         error.code().0 as u32,
@@ -83,7 +84,9 @@ pub(super) struct Snapshot {
     pub saved: Vec<Format>,
     /// Formats OLE has rendered onto the Win32 clipboard, where they must be read.
     pub rendered: Vec<u32>,
-    /// Declared metafiles that hold nothing (see `undeliverable`).
+    /// Declared formats that hold nothing (see `undeliverable`). The Win32 pass needs
+    /// only what OLE did deliver, so this is for tests and diagnosis.
+    #[allow(dead_code)]
     pub empty: Vec<u32>,
 }
 pub(super) fn snapshot(
@@ -178,11 +181,16 @@ fn materialize(
                 continue;
             }
             format.tymed = medium_for(id);
-            let medium = Medium(
-                object
-                    .GetData(&format)
-                    .map_err(|error| com_error(BackupStage::OleRead, Some(id), error))?,
-            );
+            let medium = match object.GetData(&format) {
+                Ok(medium) => Medium(medium),
+                // Declared with nothing behind it, like the EnterpriseDataProtectionId
+                // marker modern Windows apps add: no application can paste it either.
+                Err(error) if undeliverable(&error) => {
+                    empty.push(id);
+                    continue;
+                }
+                Err(error) => return Err(com_error(BackupStage::OleRead, Some(id), error)),
+            };
             if medium.0.tymed != format.tymed {
                 return Err(failure(BackupStage::UnsupportedFormat, Some(id), false));
             }
@@ -196,7 +204,7 @@ fn materialize(
                 return Err(failure(BackupStage::SourceChanged, None, false));
             }
         }
-        if saved.is_empty() && rendered.is_empty() {
+        if saved.is_empty() && rendered.is_empty() && empty.is_empty() {
             return Err(failure(BackupStage::OleEnumerate, None, false));
         }
         if !current() {
