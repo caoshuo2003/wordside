@@ -23,7 +23,7 @@ pub const MAX_CARD: f32 = 420.0;
 /// A tall header (many pronunciations) still leaves this much list in view.
 const MIN_BODY: f32 = 120.0;
 const FADE_H: f32 = 36.0;
-const GLASS_OPACITY: f32 = 0.75;
+const GLASS_OPACITY: f32 = 0.55;
 const ICON_FONT: PCWSTR = w!("Segoe MDL2 Assets");
 /// Stands for Segoe UI Variable Text where Windows 11 has it, else Segoe UI. Chinese falls
 /// back to Microsoft YaHei UI through the zh-CN locale.
