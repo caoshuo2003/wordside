@@ -80,8 +80,9 @@ static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// Drives the hovered row's pop-up, which runs for `LIFT_TIME`.
 const LIFT_TIMER: usize = 2;
 const LIFT_TIME: std::time::Duration = std::time::Duration::from_millis(220);
-/// Grayscale contrast for text on glass; Windows' default is 1.0.
+/// Grayscale contrast for text on glass; Windows' default is 1.0. See `glass_text_params`.
 const GLASS_TEXT_CONTRAST: f32 = 1.6;
+const GLASS_TEXT_CONTRAST_LOW_DPI: f32 = 1.3;
 
 type Answer = (u64, String, Result2);
 type Result2 = std::result::Result<Entry, LookupError>;
@@ -191,6 +192,53 @@ fn option(name: &str) -> Option<String> {
         .position(|arg| arg == name)
         .and_then(|index| args.get(index + 1))
         .cloned()
+}
+
+/// Glass rules out ClearType, so its text is grayscale, set up by pixel density:
+/// - From 150% up, strokes have pixels to spare: smooth both ways, with extra contrast
+///   so grayscale text doesn't come out thin.
+/// - Below that (1080p at 100% or 125%) a stem is one or two pixels. Unaligned and with
+///   that much contrast it smeared and looked bold, so lines snap to the pixel grid and
+///   the contrast comes down to near Windows' own.
+fn glass_text_params(dwrite: &IDWriteFactory, dpi: f32) -> Option<IDWriteRenderingParams> {
+    unsafe {
+        let defaults = dwrite.CreateRenderingParams().ok()?;
+        let factory = dwrite.cast::<IDWriteFactory2>().ok()?;
+        let (contrast, mode, grid) = if dpi >= 144.0 {
+            (
+                GLASS_TEXT_CONTRAST,
+                DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+                DWRITE_GRID_FIT_MODE_DEFAULT,
+            )
+        } else {
+            (
+                GLASS_TEXT_CONTRAST_LOW_DPI,
+                DWRITE_RENDERING_MODE_NATURAL,
+                DWRITE_GRID_FIT_MODE_ENABLED,
+            )
+        };
+        factory
+            .CreateCustomRenderingParams(
+                defaults.GetGamma(),
+                defaults.GetEnhancedContrast(),
+                contrast,
+                0.0,
+                DWRITE_PIXEL_GEOMETRY_FLAT,
+                mode,
+                grid,
+            )
+            .ok()
+            .and_then(|params| params.cast().ok())
+    }
+}
+
+/// The window's DPI. `--dpi 96` draws as on a 100% display whatever this one is, to
+/// check small-screen text on a high-DPI development machine.
+fn window_dpi(hwnd: HWND) -> u32 {
+    static FORCED: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
+    FORCED
+        .get_or_init(|| option("--dpi").and_then(|value| value.parse().ok()))
+        .unwrap_or_else(|| unsafe { GetDpiForWindow(hwnd) })
 }
 
 /// The taskbar has its own light or dark setting, apart from the apps'.
@@ -306,7 +354,7 @@ impl App {
     }
 
     fn fit(&self) {
-        let scale = unsafe { GetDpiForWindow(self.hwnd) } as f32 / 96.0;
+        let scale = window_dpi(self.hwnd) as f32 / 96.0;
         let width = (WIDTH * scale).ceil() as i32;
         let height = (self.frame.height() * scale).ceil() as i32;
         unsafe {
@@ -335,7 +383,7 @@ impl App {
                 // WM_SIZE can arrive while `fit` holds the app, so match the client area here.
                 return target.Resize(&size);
             }
-            let dpi = GetDpiForWindow(self.hwnd) as f32;
+            let dpi = window_dpi(self.hwnd) as f32;
             let props = D2D1_RENDER_TARGET_PROPERTIES {
                 r#type: if flag("--gpu") {
                     D2D1_RENDER_TARGET_TYPE_DEFAULT
@@ -360,21 +408,9 @@ impl App {
                 presentOptions: D2D1_PRESENT_OPTIONS_NONE,
             };
             let target = self.d2d.CreateHwndRenderTarget(&props, &hwnd_props)?;
-            // Glass rules out ClearType, and grayscale text comes out thin; more contrast
-            // gives the strokes back their weight.
             if self.glass {
-                if let Ok(factory) = self.dwrite.cast::<IDWriteFactory1>() {
-                    let defaults = self.dwrite.CreateRenderingParams()?;
-                    if let Ok(params) = factory.CreateCustomRenderingParams(
-                        defaults.GetGamma(),
-                        defaults.GetEnhancedContrast(),
-                        GLASS_TEXT_CONTRAST,
-                        0.0,
-                        DWRITE_PIXEL_GEOMETRY_FLAT,
-                        DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
-                    ) {
-                        target.SetTextRenderingParams(&params);
-                    }
+                if let Some(params) = glass_text_params(&self.dwrite, dpi) {
+                    target.SetTextRenderingParams(&params);
                 }
             }
             self.target = Some(target);
@@ -727,7 +763,7 @@ impl App {
                 None => Some(view.selected),
                 Some(mut point) => unsafe {
                     let _ = ScreenToClient(self.hwnd, &mut point);
-                    let scale = GetDpiForWindow(self.hwnd) as f32 / 96.0;
+                    let scale = window_dpi(self.hwnd) as f32 / 96.0;
                     match self.frame.hit(
                         point.x as f32 / scale,
                         point.y as f32 / scale,
@@ -1186,7 +1222,7 @@ fn with_app(run: impl FnOnce(&mut App)) -> bool {
 }
 
 fn scaled_point(hwnd: HWND, lparam: LPARAM) -> (f32, f32) {
-    let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / 96.0;
+    let scale = window_dpi(hwnd) as f32 / 96.0;
     let x = (lparam.0 & 0xffff) as i16 as f32;
     let y = ((lparam.0 >> 16) & 0xffff) as i16 as f32;
     (x / scale, y / scale)
@@ -1253,7 +1289,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     y: ((lparam.0 >> 16) & 0xffff) as i16 as i32,
                 };
                 let _ = ScreenToClient(hwnd, &mut point);
-                let scale = GetDpiForWindow(hwnd) as f32 / 96.0;
+                let scale = window_dpi(hwnd) as f32 / 96.0;
                 let (x, y) = (point.x as f32 / scale, point.y as f32 / scale);
                 let mut over_action = false;
                 with_app(|app| over_action = app.frame.hit(x, y, app.scroll).is_some());
@@ -1268,7 +1304,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let mut point = POINT::default();
                 let _ = GetCursorPos(&mut point);
                 let _ = ScreenToClient(hwnd, &mut point);
-                let scale = GetDpiForWindow(hwnd) as f32 / 96.0;
+                let scale = window_dpi(hwnd) as f32 / 96.0;
                 let mut over_action = false;
                 with_app(|app| {
                     over_action = app
