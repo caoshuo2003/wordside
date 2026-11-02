@@ -1699,14 +1699,20 @@ pub fn run() -> Result<()> {
                 _ => ThemeChoice::System,
             }
         };
+        let content = initial_content();
+        // A saved entry reads as if it had just been looked up, word in the box.
+        let query = match &content {
+            Content::Entry(view) => view.entry.query.clone(),
+            _ => String::new(),
+        };
         let mut app = App {
             hwnd,
             d2d: D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?,
             dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?,
             target: None,
             frame: Frame::default(),
-            content: initial_content(),
-            query: String::new(),
+            content,
+            query,
             scroll: 0.0,
             mouse: None,
             hover: None,
