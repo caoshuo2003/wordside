@@ -8,6 +8,7 @@ mod card;
 #[allow(dead_code)]
 mod dictionary;
 mod entry;
+mod icon;
 mod lookup;
 mod menu;
 mod presentation;

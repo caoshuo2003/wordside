@@ -1,0 +1,44 @@
+//! Puts the app icon into the exe with the Windows SDK's resource compiler. Without the SDK
+//! the build still succeeds; the exe just shows the default icon. `RC` overrides the path.
+use std::{env, path::PathBuf, process::Command};
+
+fn main() {
+    println!("cargo:rerun-if-changed=assets/wordside.rc");
+    println!("cargo:rerun-if-changed=assets/wordside.ico");
+    println!("cargo:rerun-if-env-changed=RC");
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let Some(rc) = resource_compiler() else {
+        println!("cargo:warning=rc.exe not found, so the exe gets no icon");
+        return;
+    };
+    let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("wordside.res");
+    let compiled = Command::new(&rc)
+        .args(["/nologo", "/I", "assets", "/fo"])
+        .arg(&out)
+        .arg("assets/wordside.rc")
+        .status();
+    match compiled {
+        Ok(status) if status.success() => {
+            println!("cargo:rustc-link-arg-bins={}", out.display());
+        }
+        _ => println!("cargo:warning=rc.exe failed, so the exe gets no icon"),
+    }
+}
+
+/// `RC`, else the newest x64 rc.exe of the installed Windows 10/11 SDKs.
+fn resource_compiler() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("RC") {
+        return Some(path.into());
+    }
+    let kits = PathBuf::from(env::var_os("ProgramFiles(x86)")?).join(r"Windows Kits\10\bin");
+    let mut found: Vec<PathBuf> = std::fs::read_dir(kits)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path().join(r"x64\rc.exe"))
+        .filter(|path| path.exists())
+        .collect();
+    found.sort();
+    found.pop()
+}

@@ -177,6 +177,11 @@ fn option(name: &str) -> Option<String> {
         .cloned()
 }
 
+/// The taskbar has its own light or dark setting, apart from the apps'.
+pub fn light_taskbar() -> bool {
+    personalize(w!("SystemUsesLightTheme")) == Some(1)
+}
+
 fn personalize(value: windows::core::PCWSTR) -> Option<u32> {
     let mut data = 0u32;
     let mut size = size_of::<u32>() as u32;
@@ -1286,6 +1291,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 update_and_fit(|app| {
                     app.refresh_theme();
                     app.rebuild();
+                    // The taskbar may have switched between light and dark.
+                    tray::update(app.hwnd, app.settings.enabled);
                 });
                 LRESULT(0)
             }
@@ -1378,6 +1385,10 @@ fn wait_for_launches(event: HANDLE, hwnd: HWND) {
 
 pub fn run() -> Result<()> {
     let start = Instant::now();
+    // `--export-icon <file.ico>` writes the app icon that the build puts into the exe.
+    if let Some(path) = option("--export-icon") {
+        return crate::icon::export(std::path::Path::new(&path));
+    }
     // Development runs show saved data and may sit beside the real app.
     let development = ["--payload", "--parse", "--first-paint"]
         .into_iter()
@@ -1483,6 +1494,10 @@ pub fn run() -> Result<()> {
         // the card. Development runs show their data right away.
         if development {
             with_app(|app| app.show());
+        } else {
+            // Waiting in the tray from the start: hand back what starting up touched, as
+            // hiding the card would.
+            let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
         }
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).into() {

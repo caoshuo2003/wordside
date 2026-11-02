@@ -1,0 +1,3 @@
+// The exe's icon, shown by Explorer, shortcuts and the taskbar. Regenerate wordside.ico with
+// `wordside.exe --export-icon assets\wordside.ico` after changing the drawing in src/icon.rs.
+1 ICON "wordside.ico"

@@ -1,5 +1,5 @@
-//! The notification-area icon and its menu. The icon is 0.2.0's green palette icon: one ICO
-//! holding PNG images from 16 to 64 px, of which the size the tray asks for is picked.
+//! The notification-area icon and its menu. The glyph is drawn by `icon` at the size the
+//! tray asks for, white on a dark taskbar and near-black on a light one.
 use crate::menu::{cursor, popup, Item};
 use windows::{
     core::w,
@@ -17,7 +17,6 @@ use windows::{
 
 /// The tray reports clicks with this message; `lparam` carries the mouse message.
 pub const WM_TRAY: u32 = WM_APP + 4;
-const ICON: &[u8] = include_bytes!("../assets/tray.ico");
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
@@ -25,31 +24,6 @@ pub enum Command {
     Lookup,
     Settings,
     Quit,
-}
-
-/// The ICO's image for `size` px: the smallest one at least that big, else the largest.
-fn image(ico: &[u8], size: u32) -> Option<&[u8]> {
-    let count = u16::from_le_bytes(ico.get(4..6)?.try_into().ok()?) as usize;
-    let mut best: Option<(u32, &[u8])> = None;
-    for index in 0..count {
-        let entry = ico.get(6 + 16 * index..22 + 16 * index)?;
-        let width = match entry[0] {
-            0 => 256,
-            width => width as u32,
-        };
-        let len = u32::from_le_bytes(entry[8..12].try_into().ok()?) as usize;
-        let offset = u32::from_le_bytes(entry[12..16].try_into().ok()?) as usize;
-        let data = ico.get(offset..offset.checked_add(len)?)?;
-        let better = match best {
-            None => true,
-            Some((current, _)) if current >= size => width >= size && width < current,
-            Some((current, _)) => width > current,
-        };
-        if better {
-            best = Some((width, data));
-        }
-    }
-    best.map(|(_, data)| data)
 }
 
 fn tooltip(enabled: bool) -> &'static str {
@@ -69,13 +43,9 @@ fn data(hwnd: HWND, enabled: bool) -> NOTIFYICONDATAW {
         uCallbackMessage: WM_TRAY,
         ..Default::default()
     };
-    let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
-    if let Some(png) = image(ICON, size as u32) {
-        if let Ok(icon) =
-            unsafe { CreateIconFromResourceEx(png, true, 0x0003_0000, size, size, LR_DEFAULTCOLOR) }
-        {
-            data.hIcon = icon;
-        }
+    let size = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16) as u32;
+    if let Ok(icon) = crate::icon::tray(size, crate::app::light_taskbar()) {
+        data.hIcon = icon;
     }
     for (slot, unit) in data.szTip.iter_mut().zip(tooltip(enabled).encode_utf16()) {
         *slot = unit;
@@ -100,6 +70,7 @@ pub fn add(hwnd: HWND, enabled: bool) -> bool {
     notify(NIM_ADD, hwnd, enabled)
 }
 
+/// Also redraws the glyph, so a taskbar that turned light or dark gets the right color.
 pub fn update(hwnd: HWND, enabled: bool) {
     notify(NIM_MODIFY, hwnd, enabled);
 }
@@ -145,44 +116,6 @@ pub fn menu(hwnd: HWND, enabled: bool, hotkey: &str) -> Option<Command> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n";
-    fn width(png: &[u8]) -> u32 {
-        u32::from_be_bytes(png[16..20].try_into().unwrap())
-    }
-
-    // Ported from 0.2.0 `picks_the_smallest_image_at_least_as_big`, for the one icon kept.
-    #[test]
-    fn picks_the_smallest_image_at_least_as_big() {
-        for (want, got) in [
-            (16, 16),
-            (20, 20),
-            (24, 24),
-            (28, 32),
-            (32, 32),
-            (40, 40),
-            (48, 48),
-            (56, 64),
-            (64, 64),
-            (96, 64),
-            (1, 16),
-        ] {
-            let png = image(ICON, want).unwrap();
-            assert!(png.starts_with(PNG), "{want}");
-            assert_eq!(width(png), got, "{want}");
-        }
-    }
-
-    // Ported from 0.2.0 `malformed_ico_is_refused`.
-    #[test]
-    fn malformed_ico_is_refused() {
-        assert_eq!(image(&[], 16), None);
-        assert_eq!(image(&ICON[..10], 16), None);
-        assert_eq!(
-            image(&ICON[..ICON.len() - 1], 64),
-            None,
-            "the last image is cut short"
-        );
-    }
 
     #[test]
     fn the_tooltip_tells_whether_auto_lookup_is_on() {
