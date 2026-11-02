@@ -7,6 +7,7 @@ use crate::{
     render::{self, Action, Frame, Theme, DARK, INPUT_H, LIGHT, WIDTH},
     selection_input::selected_word,
     service::Service,
+    settings,
 };
 use serde_json::json;
 use std::{
@@ -870,12 +871,19 @@ pub fn run() -> Result<()> {
             MOD_ALT | MOD_CONTROL,
             u32::from(b'A'),
         );
+        let preferences = settings::path()
+            .map(|path| settings::load(&path))
+            .unwrap_or_default();
         let choice = if flag("--light") {
             ThemeChoice::Light
         } else if flag("--dark") {
             ThemeChoice::Dark
         } else {
-            ThemeChoice::System
+            match preferences.theme.as_str() {
+                "light" => ThemeChoice::Light,
+                "dark" => ThemeChoice::Dark,
+                _ => ThemeChoice::System,
+            }
         };
         let mut app = App {
             hwnd,

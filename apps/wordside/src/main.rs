@@ -13,6 +13,7 @@ mod presentation;
 mod render;
 mod selection_input;
 mod service;
+mod settings;
 
 fn main() -> windows::core::Result<()> {
     app::run()
