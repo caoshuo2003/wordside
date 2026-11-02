@@ -16,8 +16,17 @@ fn main() {
         return;
     };
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR")).join("wordside.res");
+    let part = |name| env::var(name).unwrap_or_else(|_| "0".into());
     let compiled = Command::new(&rc)
-        .args(["/nologo", "/I", "assets", "/fo"])
+        .args(["/nologo", "/I", "assets"])
+        .arg(format!("/dWS_MAJOR={}", part("CARGO_PKG_VERSION_MAJOR")))
+        .arg(format!("/dWS_MINOR={}", part("CARGO_PKG_VERSION_MINOR")))
+        .arg(format!("/dWS_PATCH={}", part("CARGO_PKG_VERSION_PATCH")))
+        .arg(format!(
+            "/dWS_VERSION=\"{}\"",
+            env::var("CARGO_PKG_VERSION").unwrap_or_default()
+        ))
+        .arg("/fo")
         .arg(&out)
         .arg("assets/wordside.rc")
         .status();
