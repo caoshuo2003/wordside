@@ -90,7 +90,8 @@ impl EntryView {
             coverage,
             tab: 0,
             selected: 0,
-            expanded: Some(0),
+            // Examples open on request; the card first shows only the senses.
+            expanded: None,
         }
     }
 
@@ -115,7 +116,7 @@ impl EntryView {
         if tab < self.groups.len() {
             self.tab = tab;
             self.selected = 0;
-            self.expanded = Some(0);
+            self.expanded = None;
         }
     }
 
@@ -447,10 +448,12 @@ mod tests {
             definition("verb", "经营"),
             definition("noun", "跑步"),
         ]);
+        assert_eq!(card.expanded, None, "examples start closed");
         card.move_selection(1);
+        card.set_expanded(true);
         card.next_tab();
         assert_eq!(card.visible()[0].translation, "跑步");
-        assert_eq!((card.selected, card.expanded), (0, Some(0)));
+        assert_eq!((card.selected, card.expanded), (0, None));
         card.next_tab();
         assert_eq!(card.tab, 0, "tabs wrap around");
     }
