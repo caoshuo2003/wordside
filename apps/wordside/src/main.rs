@@ -4,8 +4,7 @@ mod app;
 mod audio;
 mod cache;
 mod card;
-// Some backend diagnostics are only reached by the CLI entries added later in this milestone.
-#[allow(dead_code)]
+mod cli;
 mod dictionary;
 mod entry;
 mod icon;
@@ -22,5 +21,8 @@ mod shortcut;
 mod tray;
 
 fn main() -> windows::core::Result<()> {
+    if cli::run() {
+        return Ok(());
+    }
     app::run()
 }

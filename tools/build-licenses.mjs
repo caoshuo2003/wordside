@@ -4,7 +4,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 const root=dirname(dirname(fileURLToPath(import.meta.url)));
-const native=join(root,'desktop/src-tauri');
+// `--crate apps/wordside` collects the new native app's notices; without it, 0.2.0's.
+const crateArg=process.argv.indexOf('--crate');
+const native=join(root,crateArg>0?process.argv[crateArg+1]:'desktop/src-tauri');
 const metadata=spawnSync('cargo',['metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-msvc'],{cwd:native,encoding:'utf8',windowsHide:true,maxBuffer:32*1024*1024});
 if(metadata.status!==0){process.stderr.write(metadata.stderr||'Cargo metadata failed\n');process.exit(metadata.status||1);}
 const data=JSON.parse(metadata.stdout),packages=new Map(data.packages.map(pkg=>[pkg.id,pkg]));
@@ -21,7 +23,7 @@ function licenseFiles(folder,depth=0){
  }
  return files;
 }
-const version=JSON.parse(readFileSync(join(root,'desktop/package.json'),'utf8')).version;
+const version=crateArg>0?packages.get(data.resolve.root).version:JSON.parse(readFileSync(join(root,'desktop/package.json'),'utf8')).version;
 const sections=[`WordSide ${version}\nWindows x64 native distribution; no Node runtime or JavaScript API dependencies are bundled.\nThis list includes native transitive/build dependencies conservatively.`,
  'Cambridge parser port derived from Nongfsq/cambridge-dictionary-api\n'+readFileSync(join(root,'modules/cambridge-dictionary-api/LICENSE.txt'),'utf8')];
 const missing=[];

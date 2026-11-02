@@ -4,6 +4,7 @@ desktop/app.js
 desktop/src-tauri/target/
 desktop/src-tauri/dictionary-runtime/
 desktop/src-tauri/generated/
+apps/wordside/generated/
 release/
 .delivery/
 .artifacts/
