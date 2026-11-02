@@ -9,6 +9,7 @@ mod card;
 mod dictionary;
 mod entry;
 mod lookup;
+mod menu;
 mod presentation;
 mod render;
 mod selection_input;

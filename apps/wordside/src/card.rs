@@ -217,6 +217,16 @@ pub enum Content {
     Failure(FailureView),
 }
 
+/// What “复制这条释义” puts on the clipboard: the translation, then the English meaning,
+/// one per line; whichever is missing is left out.
+pub fn sense_text(definition: &Definition) -> String {
+    [definition.translation.trim(), definition.text.trim()]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("\r\n")
+}
+
 /// The appearance choices, in the order the settings page shows them.
 pub const THEMES: [(&str, &str); 3] = [("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")];
 
@@ -468,6 +478,19 @@ mod tests {
         let failure = FailureView::from_error(&missing, "termnal");
         assert!(!failure.can_retry() && failure.source_url.is_none());
         assert_eq!(failure.suggestions, ["terminal"]);
+    }
+
+    #[test]
+    fn a_copied_sense_is_the_translation_then_the_meaning() {
+        let card = view(vec![
+            definition("verb", " 跑 "),
+            json!({"pos":"verb","text":"","translation":"经营","example":[]}),
+            definition("verb", ""),
+        ]);
+        let senses = card.visible();
+        assert_eq!(sense_text(senses[0]), "跑\r\nmeaning");
+        assert_eq!(sense_text(senses[1]), "经营");
+        assert_eq!(sense_text(senses[2]), "meaning");
     }
 
     #[test]

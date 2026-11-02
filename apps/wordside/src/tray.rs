@@ -1,9 +1,10 @@
 //! The notification-area icon and its menu. The icon is 0.2.0's green palette icon: one ICO
 //! holding PNG images from 16 to 64 px, of which the size the tray asks for is picked.
+use crate::menu::{cursor, popup, Item};
 use windows::{
-    core::{w, HSTRING, PCWSTR},
+    core::w,
     Win32::{
-        Foundation::{HWND, LPARAM, POINT, WPARAM},
+        Foundation::HWND,
         UI::{
             Shell::{
                 Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY,
@@ -20,7 +21,7 @@ const ICON: &[u8] = include_bytes!("../assets/tray.ico");
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Command {
-    ToggleAuto = 1,
+    ToggleAuto,
     Lookup,
     Settings,
     Quit,
@@ -114,50 +115,31 @@ pub fn taskbar_created() -> u32 {
 
 /// Shows the menu at the mouse and returns the chosen command.
 pub fn menu(hwnd: HWND, enabled: bool, hotkey: &str) -> Option<Command> {
-    unsafe {
-        let menu = CreatePopupMenu().ok()?;
-        let lookup = HSTRING::from(if hotkey.is_empty() {
-            "查词".to_owned()
-        } else {
-            format!("查词\t{hotkey}")
-        });
-        let check = if enabled { MF_CHECKED } else { MF_UNCHECKED };
-        let _ = AppendMenuW(
-            menu,
-            MF_STRING | check,
-            Command::ToggleAuto as usize,
-            w!("自动划词"),
-        );
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, Command::Lookup as usize, &lookup);
-        let _ = AppendMenuW(menu, MF_STRING, Command::Settings as usize, w!("设置"));
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let _ = AppendMenuW(menu, MF_STRING, Command::Quit as usize, w!("退出"));
-        let mut point = POINT::default();
-        let _ = GetCursorPos(&mut point);
-        // Without this the menu stays open after a click elsewhere.
-        let _ = SetForegroundWindow(hwnd);
-        let chosen = TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
-            point.x,
-            point.y,
-            None,
-            hwnd,
-            None,
-        )
-        .0;
-        let _ = PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(menu);
-        [
-            Command::ToggleAuto,
-            Command::Lookup,
-            Command::Settings,
-            Command::Quit,
-        ]
-        .into_iter()
-        .find(|command| *command as i32 == chosen)
-    }
+    let lookup = if hotkey.is_empty() {
+        "查词".to_owned()
+    } else {
+        format!("查词\t{hotkey}")
+    };
+    let items = [
+        Item::Command {
+            label: "自动划词",
+            checked: enabled,
+        },
+        Item::Separator,
+        Item::command(&lookup),
+        Item::command("设置"),
+        Item::Separator,
+        Item::command("退出"),
+    ];
+    let commands = [
+        Some(Command::ToggleAuto),
+        None,
+        Some(Command::Lookup),
+        Some(Command::Settings),
+        None,
+        Some(Command::Quit),
+    ];
+    popup(hwnd, &items, cursor()).and_then(|index| commands[index])
 }
 
 #[cfg(test)]

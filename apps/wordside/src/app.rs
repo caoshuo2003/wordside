@@ -2,11 +2,12 @@
 use crate::{
     audio::{self, Player},
     card::{
-        allowed_link, pressed_combo, Content, EntryView, FailureView, SettingsChange, SettingsKey,
-        SettingsView, Sound,
+        allowed_link, pressed_combo, sense_text, Content, EntryView, FailureView, SettingsChange,
+        SettingsKey, SettingsView, Sound,
     },
     dictionary,
     entry::{read_api_entry, Entry, LookupError},
+    menu,
     presentation::shortcut_notice,
     render::{self, Action, Frame, Theme, DARK, INPUT_H, LIGHT, WIDTH},
     selection_input::selected_word,
@@ -38,9 +39,11 @@ use windows::{
             Gdi::*,
         },
         System::{
-            DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard},
+            DataExchange::{
+                CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+            },
             LibraryLoader::{GetModuleHandleW, GetProcAddress},
-            Memory::{GlobalLock, GlobalUnlock},
+            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
             Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD},
             Threading::*,
         },
@@ -633,6 +636,63 @@ impl App {
         }
     }
 
+    /// The right-click menu for the point `at` (screen pixels), or for the selected row
+    /// when it came from the keyboard. Empty on the settings page.
+    fn context_menu(&self, at: Option<POINT>) -> Vec<(String, Option<Pick>)> {
+        if self.page.is_some() {
+            return Vec::new();
+        }
+        let mut items: Vec<(String, Option<Pick>)> = Vec::new();
+        let mut source = None;
+        if let Content::Entry(view) = &self.content {
+            let word = view.entry.word.clone();
+            items.push((format!("复制“{word}”"), Some(Pick::Copy(word))));
+            let row = match at {
+                None => Some(view.selected),
+                Some(mut point) => unsafe {
+                    let _ = ScreenToClient(self.hwnd, &mut point);
+                    let scale = GetDpiForWindow(self.hwnd) as f32 / 96.0;
+                    match self.frame.hit(
+                        point.x as f32 / scale,
+                        point.y as f32 / scale,
+                        self.scroll,
+                    ) {
+                        Some(Action::Sense(index)) => Some(index),
+                        _ => None,
+                    }
+                },
+            };
+            if let Some(definition) = row.and_then(|index| view.visible().get(index).copied()) {
+                items.push((
+                    "复制这条释义".into(),
+                    Some(Pick::Copy(sense_text(definition))),
+                ));
+            }
+            source = Some(view.entry.source_url.clone());
+        } else if let Content::Failure(failure) = &self.content {
+            source = failure.source_url.clone();
+        }
+        if let Some(url) = source.filter(|url| allowed_link(url)) {
+            items.push((String::new(), None));
+            items.push(("在 Cambridge 打开".into(), Some(Pick::Open(url))));
+        }
+        if !items.is_empty() {
+            items.push((String::new(), None));
+        }
+        items.push(("设置\tCtrl+,".into(), Some(Pick::Settings)));
+        items
+    }
+
+    fn pick(&mut self, pick: Pick) {
+        match pick {
+            Pick::Copy(text) => {
+                write_clipboard_text(self.hwnd, &text);
+            }
+            Pick::Open(url) => self.act(Action::Open(url)),
+            Pick::Settings => self.open_settings(),
+        }
+    }
+
     /// Every change goes through here and only takes once the file is saved, so what the
     /// card and the tray show is always what the next start will read.
     fn save(&mut self, next: Settings) -> bool {
@@ -791,6 +851,42 @@ impl App {
             let _ = ShowWindow(self.hwnd, SW_SHOW);
             let _ = SetForegroundWindow(self.hwnd);
         }
+    }
+}
+
+/// What a right-click menu item does; the text is taken when the menu opens.
+#[derive(Clone)]
+enum Pick {
+    Copy(String),
+    Open(String),
+    Settings,
+}
+
+fn write_clipboard_text(hwnd: HWND, text: &str) -> bool {
+    let wide: Vec<u16> = text.encode_utf16().chain(Some(0)).collect();
+    unsafe {
+        if OpenClipboard(Some(hwnd)).is_err() {
+            return false;
+        }
+        let written = (|| {
+            EmptyClipboard().ok()?;
+            let global = GlobalAlloc(GMEM_MOVEABLE, wide.len() * 2).ok()?;
+            let data = GlobalLock(global) as *mut u16;
+            if data.is_null() {
+                let _ = GlobalFree(Some(global));
+                return None;
+            }
+            std::ptr::copy_nonoverlapping(wide.as_ptr(), data, wide.len());
+            let _ = GlobalUnlock(global);
+            // On success the clipboard owns the memory.
+            if SetClipboardData(CF_UNICODETEXT, Some(HANDLE(global.0))).is_err() {
+                let _ = GlobalFree(Some(global));
+                return None;
+            }
+            Some(())
+        })();
+        let _ = CloseClipboard();
+        written.is_some()
     }
 }
 
@@ -983,6 +1079,40 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_KEYDOWN => {
                 let key = wparam.0 as u16;
                 update_and_fit(|app| app.key(key));
+                LRESULT(0)
+            }
+            WM_CONTEXTMENU => {
+                // From the keyboard (menu key, Shift+F10) lparam is -1: use the selected row,
+                // and open the menu under the input row.
+                let keyboard = lparam.0 as i32 == -1;
+                let at = if keyboard {
+                    let mut corner = POINT { x: 24, y: 60 };
+                    let _ = ClientToScreen(hwnd, &mut corner);
+                    corner
+                } else {
+                    POINT {
+                        x: (lparam.0 & 0xffff) as i16 as i32,
+                        y: ((lparam.0 >> 16) & 0xffff) as i16 as i32,
+                    }
+                };
+                let mut entries = Vec::new();
+                with_app(|app| entries = app.context_menu((!keyboard).then_some(at)));
+                if entries.is_empty() {
+                    return LRESULT(0);
+                }
+                let items: Vec<menu::Item> = entries
+                    .iter()
+                    .map(|(label, pick)| match pick {
+                        Some(_) => menu::Item::command(label),
+                        None => menu::Item::Separator,
+                    })
+                    .collect();
+                // The menu runs its own message loop, so the app is not borrowed here.
+                if let Some(pick) =
+                    menu::popup(hwnd, &items, at).and_then(|index| entries[index].1.clone())
+                {
+                    update_and_fit(|app| app.pick(pick));
+                }
                 LRESULT(0)
             }
             // Alt combinations arrive as system keys; only recording a shortcut wants them.
@@ -1254,7 +1384,11 @@ pub fn run() -> Result<()> {
         };
         app.refresh_theme();
         APP.with(|cell| *cell.borrow_mut() = Some(app));
-        with_app(|app| app.show());
+        // A normal start waits in the tray; the shortcut, the tray or another launch shows
+        // the card. Development runs show their data right away.
+        if development {
+            with_app(|app| app.show());
+        }
         let mut message = MSG::default();
         while GetMessageW(&mut message, None, 0, 0).into() {
             let _ = TranslateMessage(&message);
