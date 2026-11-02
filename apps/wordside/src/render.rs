@@ -2,8 +2,9 @@
 use crate::card::{Content, Coverage, SettingsChange, SettingsView, Sound, THEMES};
 use crate::presentation::{source_label, PronunciationChip};
 use crate::settings::Settings;
+use std::sync::OnceLock;
 use windows::{
-    core::{w, Result, PCWSTR},
+    core::{w, Result, BOOL, PCWSTR},
     Win32::Graphics::{
         Direct2D::{Common::*, *},
         DirectWrite::*,
@@ -11,10 +12,12 @@ use windows::{
 };
 use windows_numerics::{Matrix3x2, Vector2};
 
-pub const WIDTH: f32 = 388.0;
-const PAD: f32 = 16.0;
-pub const INPUT_H: f32 = 54.0;
-const FOOT_H: f32 = 34.0;
+pub const WIDTH: f32 = 400.0;
+const PAD: f32 = 20.0;
+pub const INPUT_H: f32 = 52.0;
+const FOOT_H: f32 = 36.0;
+/// Definitions and examples, from their left edge to the card's right padding.
+const TEXT_X: f32 = 26.0;
 /// The whole card stops growing here; the body scrolls instead.
 const MAX_CARD: f32 = 420.0;
 /// A tall header (many pronunciations) still leaves this much list in view.
@@ -22,7 +25,35 @@ const MIN_BODY: f32 = 120.0;
 const FADE_H: f32 = 36.0;
 const GLASS_OPACITY: f32 = 0.75;
 const ICON_FONT: PCWSTR = w!("Segoe MDL2 Assets");
+/// Stands for Segoe UI Variable Text where Windows 11 has it, else Segoe UI. Chinese falls
+/// back to Microsoft YaHei UI through the zh-CN locale.
 const TEXT_FONT: PCWSTR = w!("Segoe UI");
+
+fn text_family(dwrite: &IDWriteFactory) -> PCWSTR {
+    static VARIABLE: OnceLock<bool> = OnceLock::new();
+    let variable = *VARIABLE.get_or_init(|| unsafe {
+        let mut collection = None;
+        if dwrite
+            .GetSystemFontCollection(&mut collection, false)
+            .is_err()
+        {
+            return false;
+        }
+        let Some(collection) = collection else {
+            return false;
+        };
+        let (mut index, mut exists) = (0, BOOL(0));
+        collection
+            .FindFamilyName(w!("Segoe UI Variable Text"), &mut index, &mut exists)
+            .is_ok()
+            && exists.as_bool()
+    });
+    if variable {
+        w!("Segoe UI Variable Text")
+    } else {
+        TEXT_FONT
+    }
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Rgba(u32, f32);
@@ -103,9 +134,12 @@ pub enum Action {
 }
 
 impl Action {
-    /// Rows tint under the mouse.
-    fn is_row(&self) -> bool {
-        matches!(self, Action::Sense(_) | Action::Settings(..))
+    /// Rows and the readings tint under the mouse.
+    fn tints(&self) -> bool {
+        matches!(
+            self,
+            Action::Sense(_) | Action::Settings(..) | Action::Sound(_)
+        )
     }
 }
 
@@ -194,23 +228,27 @@ impl Frame {
             })
             .map(|hit| hit.action.clone())
     }
-    /// The definition row under the mouse, in body coordinates.
-    fn hovered_row(&self, x: f32, y: f32, scroll: f32) -> Option<D2D_RECT_F> {
+    /// The row or reading under the mouse, in its zone's coordinates.
+    fn hovered(&self, x: f32, y: f32, scroll: f32) -> Option<(Zone, D2D_RECT_F)> {
         let foot_top = self.head_h + self.visible_body();
-        if y < self.head_h || y >= foot_top {
+        let (zone, y) = if y < self.head_h {
+            (Zone::Head, y)
+        } else if y < foot_top {
+            (Zone::Body, y - self.head_h + scroll)
+        } else {
             return None;
-        }
-        let y = y - self.head_h + scroll;
+        };
         self.hits
             .iter()
             .find(|hit| {
-                hit.action.is_row()
+                hit.zone == zone
+                    && hit.action.tints()
                     && x >= hit.rect.left
                     && x < hit.rect.right
                     && y >= hit.rect.top
                     && y < hit.rect.bottom
             })
-            .map(|hit| hit.rect)
+            .map(|hit| (zone, hit.rect))
     }
 }
 
@@ -223,7 +261,10 @@ struct Style {
     size: f32,
     bold: bool,
     ink: Ink,
-    font: PCWSTR,
+    /// None is the text family.
+    font: Option<PCWSTR>,
+    /// Line height as a multiple of the size; 0 keeps the font's own.
+    line: f32,
 }
 
 const fn style(size: f32, bold: bool, ink: Ink) -> Style {
@@ -231,7 +272,26 @@ const fn style(size: f32, bold: bool, ink: Ink) -> Style {
         size,
         bold,
         ink,
-        font: TEXT_FONT,
+        font: None,
+        line: 0.0,
+    }
+}
+
+const fn icon(size: f32, ink: Ink) -> Style {
+    Style {
+        size,
+        bold: false,
+        ink,
+        font: Some(ICON_FONT),
+        line: 0.0,
+    }
+}
+
+impl Style {
+    /// Paragraphs that wrap read easier with a little more room between lines.
+    const fn lines(mut self, line: f32) -> Self {
+        self.line = line;
+        self
     }
 }
 
@@ -270,8 +330,9 @@ impl Builder<'_> {
             } else {
                 DWRITE_FONT_WEIGHT_NORMAL
             };
+            let family = style.font.unwrap_or_else(|| text_family(self.dwrite));
             let format = self.dwrite.CreateTextFormat(
-                style.font,
+                family,
                 None,
                 weight,
                 DWRITE_FONT_STYLE_NORMAL,
@@ -279,6 +340,10 @@ impl Builder<'_> {
                 style.size,
                 w!("zh-CN"),
             )?;
+            if style.line > 0.0 {
+                let height = style.size * style.line;
+                format.SetLineSpacing(DWRITE_LINE_SPACING_METHOD_UNIFORM, height, height * 0.8)?;
+            }
             let wide: Vec<u16> = text.encode_utf16().collect();
             let layout = self
                 .dwrite
@@ -292,65 +357,62 @@ impl Builder<'_> {
         }
     }
 
-    /// A pronunciation pill. Returns its width and height; the caller wraps the row.
-    fn chip(
+    /// One reading as a quiet button: region, IPA, then the speaker. It tints only under the
+    /// mouse. Returns its width; the caller wraps the row.
+    fn reading(
         &mut self,
         x: f32,
         y: f32,
         chip: &PronunciationChip,
         sound: Sound,
         index: usize,
-    ) -> Result<(f32, f32)> {
-        let prefix = if chip.pos.is_empty() {
-            String::new()
-        } else {
-            format!("{} ", chip.pos)
-        };
-        let label = format!("{prefix}{} {}", chip.lang, chip.pron);
+    ) -> Result<f32> {
         let voiced = !chip.url.is_empty();
-        let ink = match sound {
-            Sound::Loading | Sound::Playing => Ink::Accent,
-            Sound::Failed => Ink::Muted,
-            Sound::Idle if voiced => Ink::Strong,
-            Sound::Idle => Ink::Soft,
+        let (ipa_ink, icon_ink) = match sound {
+            Sound::Loading | Sound::Playing => (Ink::Accent, Ink::Accent),
+            Sound::Failed => (Ink::Muted, Ink::Muted),
+            Sound::Idle => (Ink::Soft, Ink::Accent),
         };
-        let (w, h) = self.text(
+        let mut x2 = x + 6.0;
+        let (w, _) = self.text(
             Zone::Head,
-            &label,
-            x + 10.0,
-            y + 4.0,
-            300.0,
-            style(13.0, false, ink),
+            &chip.lang,
+            x2,
+            y + 6.0,
+            40.0,
+            style(12.5, false, Ink::Muted),
         )?;
-        let mut width = w + 20.0;
+        x2 += w + 5.0;
+        let (w, _) = self.text(
+            Zone::Head,
+            &chip.pron,
+            x2,
+            y + 4.0,
+            220.0,
+            style(14.0, false, ipa_ink),
+        )?;
+        x2 += w;
         if voiced {
-            let icon = match sound {
+            let glyph = match sound {
                 Sound::Loading | Sound::Playing => "\u{E71A}",
                 Sound::Failed => "\u{E72C}",
                 Sound::Idle => "\u{E767}",
             };
-            let (iw, _) = self.text(
+            let (w, _) = self.text(
                 Zone::Head,
-                icon,
-                x + 10.0 + w + 4.0,
-                y + 7.0,
+                glyph,
+                x2 + 5.0,
+                y + 8.0,
                 20.0,
-                Style {
-                    size: 12.0,
-                    bold: false,
-                    ink,
-                    font: ICON_FONT,
-                },
+                icon(12.0, icon_ink),
             )?;
-            width += iw + 4.0;
+            x2 += 5.0 + w;
         }
-        // Every reading is a pill so none reads as stray text; only those with a sound respond.
-        let pill = rect(x, y, width, h + 8.0);
-        self.shape(Zone::Head, pill, (h + 8.0) / 2.0, Fill::Row);
+        let width = x2 + 6.0 - x;
         if voiced {
-            self.hit(Zone::Head, pill, Action::Sound(index));
+            self.hit(Zone::Head, rect(x, y, width, 28.0), Action::Sound(index));
         }
-        Ok((width, h + 8.0))
+        Ok(width)
     }
 
     fn shape(&mut self, zone: Zone, rect: D2D_RECT_F, radius: f32, fill: Fill) {
@@ -608,7 +670,7 @@ pub fn build_settings(
         PAD,
         y,
         WIDTH - PAD * 2.0,
-        style(12.0, false, Ink::Muted),
+        style(12.5, false, Ink::Muted),
     )?;
     y += h + 12.0;
 
@@ -616,14 +678,14 @@ pub fn build_settings(
     b.text(
         Zone::Foot,
         if view.recording {
-            "Esc 取消   Backspace 停用快捷键"
+            "Esc 取消 · Backspace 停用快捷键"
         } else {
-            "↑↓ 选择   Enter 修改   Esc 返回"
+            "↑↓ 选择 · Enter 修改 · Esc 返回"
         },
         PAD,
-        9.0,
+        10.0,
         WIDTH - PAD * 2.0,
-        style(12.0, false, Ink::Muted),
+        style(12.5, false, Ink::Muted),
     )?;
     b.frame.head_h = INPUT_H;
     b.frame.body_h = y;
@@ -646,16 +708,11 @@ pub fn build(
         Zone::Head,
         "\u{E721}",
         PAD,
-        19.0,
+        18.0,
         20.0,
-        Style {
-            size: 15.0,
-            bold: false,
-            ink: Ink::Muted,
-            font: ICON_FONT,
-        },
+        icon(14.0, Ink::Muted),
     )?;
-    let input_x = PAD + 26.0;
+    let input_x = PAD + 24.0;
     if query.is_empty() {
         b.text(
             Zone::Head,
@@ -663,7 +720,7 @@ pub fn build(
             input_x,
             15.0,
             WIDTH - input_x - 82.0,
-            style(17.0, false, Ink::Muted),
+            style(15.0, false, Ink::Muted),
         )?;
         b.frame.caret_x = Some(input_x - 2.0);
     } else {
@@ -671,43 +728,33 @@ pub fn build(
             Zone::Head,
             query,
             input_x,
-            15.0,
+            14.0,
             2000.0,
-            style(17.0, false, Ink::Strong),
+            style(16.0, false, Ink::Strong),
         )?;
         b.frame.caret_x = Some((input_x + w).min(WIDTH - 84.0));
     }
-    let pin_rect = rect(WIDTH - 42.0, 11.0, 32.0, 32.0);
+    let pin_rect = rect(WIDTH - 42.0, 10.0, 32.0, 32.0);
     if pinned {
         b.shape(Zone::Head, pin_rect, 8.0, Fill::Row);
     }
     b.text(
         Zone::Head,
         if pinned { "\u{E840}" } else { "\u{E718}" },
-        WIDTH - 34.0,
-        19.0,
+        WIDTH - 33.0,
+        18.0,
         20.0,
-        Style {
-            size: 15.0,
-            bold: false,
-            ink: if pinned { Ink::Accent } else { Ink::Soft },
-            font: ICON_FONT,
-        },
+        icon(14.0, if pinned { Ink::Accent } else { Ink::Muted }),
     )?;
     b.hit(Zone::Head, pin_rect, Action::Pin);
-    let gear_rect = rect(WIDTH - 76.0, 11.0, 32.0, 32.0);
+    let gear_rect = rect(WIDTH - 76.0, 10.0, 32.0, 32.0);
     b.text(
         Zone::Head,
         "\u{E713}",
-        WIDTH - 68.0,
-        19.0,
+        WIDTH - 67.0,
+        18.0,
         20.0,
-        Style {
-            size: 15.0,
-            bold: false,
-            ink: Ink::Soft,
-            font: ICON_FONT,
-        },
+        icon(14.0, Ink::Muted),
     )?;
     b.hit(Zone::Head, gear_rect, Action::OpenSettings);
     let mut head = INPUT_H;
@@ -781,7 +828,8 @@ pub fn build(
         Content::Entry(view) => {
             let width = WIDTH - PAD * 2.0;
             head += 12.0;
-            let (_, h) = b.text(
+            // The word, with this part of speech's readings on the same line when they fit.
+            let (word_w, word_h) = b.text(
                 Zone::Head,
                 &view.entry.word,
                 PAD,
@@ -789,160 +837,167 @@ pub fn build(
                 width,
                 style(26.0, true, Ink::Strong),
             )?;
-            head += h + 2.0;
-            if let Some(origin) = view.origin() {
+            let mut x = PAD + word_w + 4.0;
+            let mut line_top = head + (word_h - 28.0) / 2.0 + 2.0;
+            let mut bottom = head + word_h;
+            for index in view.tab_chips() {
+                let pieces = b.frame.pieces.len();
+                let hits = b.frame.hits.len();
+                let w = b.reading(x, line_top, &view.chips[index], view.sounds[index], index)?;
+                if x > PAD && x + w > WIDTH - PAD + 6.0 {
+                    // Too wide for what is left: start a new line under the word.
+                    let (dx, dy) = (PAD - 6.0 - x, bottom.max(line_top + 28.0) + 2.0 - line_top);
+                    for piece in &mut b.frame.pieces[pieces..] {
+                        piece.x += dx;
+                        piece.y += dy;
+                    }
+                    for hit in &mut b.frame.hits[hits..] {
+                        hit.rect = moved(hit.rect, dx, dy);
+                    }
+                    line_top += dy;
+                    x = PAD - 6.0;
+                }
+                x += w + 2.0;
+                bottom = bottom.max(line_top + 28.0);
+            }
+            head = bottom + 2.0;
+            let notes = [
+                view.origin(),
+                view.tab_chips()
+                    .any(|index| view.sounds[index] == Sound::Failed)
+                    .then(|| "发音暂时无法播放，点击重试。".to_owned()),
+                (view.coverage == Coverage::English)
+                    .then(|| "这个词暂无中文释义，下面是英文解释。".to_owned()),
+            ];
+            for note in notes.into_iter().flatten() {
                 let (_, h) = b.text(
                     Zone::Head,
-                    &origin,
+                    &note,
                     PAD,
                     head,
                     width,
-                    style(12.0, false, Ink::Muted),
+                    style(12.5, false, Ink::Muted),
                 )?;
                 head += h + 2.0;
             }
-            if !view.chips.is_empty() {
-                head += 4.0;
-                let mut x = PAD;
-                let mut line_h = 0.0f32;
-                for (index, chip) in view.chips.iter().enumerate() {
-                    let pieces = b.frame.pieces.len();
-                    let shapes = b.frame.shapes.len();
-                    let hits = b.frame.hits.len();
-                    let (w, h) = b.chip(x, head, chip, view.sounds[index], index)?;
-                    // Too wide for what is left of the row: move the pill to a new one.
-                    if x > PAD && x + w > WIDTH - PAD {
-                        let (dx, dy) = (PAD - x, line_h + 6.0);
-                        for piece in &mut b.frame.pieces[pieces..] {
-                            piece.x += dx;
-                            piece.y += dy;
-                        }
-                        for shape in &mut b.frame.shapes[shapes..] {
-                            shape.rect = moved(shape.rect, dx, dy);
-                        }
-                        for hit in &mut b.frame.hits[hits..] {
-                            hit.rect = moved(hit.rect, dx, dy);
-                        }
-                        head += dy;
-                        x = PAD;
-                        line_h = 0.0;
-                    }
-                    x += w + 6.0;
-                    line_h = line_h.max(h);
-                }
-                head += line_h + 6.0;
-                if view.sounds.contains(&Sound::Failed) {
-                    let (_, h) = b.text(
-                        Zone::Head,
-                        "发音暂时无法播放，点击重试。",
-                        PAD,
-                        head,
-                        width,
-                        style(12.0, false, Ink::Muted),
-                    )?;
-                    head += h + 4.0;
-                }
-            }
-            match view.coverage {
-                Coverage::English => {
-                    let (_, h) = b.text(
-                        Zone::Head,
-                        "这个词暂无中文释义，下面是英文解释。",
-                        PAD,
-                        head,
-                        width,
-                        style(12.0, false, Ink::Muted),
-                    )?;
-                    head += h + 6.0;
-                }
-                Coverage::Partial => {
-                    let (_, h) = b.text(
-                        Zone::Head,
-                        "部分释义仅有英文。",
-                        PAD,
-                        head,
-                        width,
-                        style(12.0, false, Ink::Muted),
-                    )?;
-                    head += h + 6.0;
-                }
-                _ => {}
-            }
             if view.groups.len() > 1 {
+                head += 2.0;
                 let mut x = PAD;
                 for (index, group) in view.groups.iter().enumerate() {
                     let current = index == view.tab;
-                    let label = format!("{} {}", group.label, group.count);
-                    let (w, h) = b.text(
+                    let (w, _) = b.text(
                         Zone::Head,
-                        &label,
+                        &group.label,
                         x,
-                        head,
+                        head + 5.0,
                         200.0,
                         style(
-                            13.0,
+                            14.0,
                             current,
                             if current { Ink::Strong } else { Ink::Muted },
                         ),
                     )?;
+                    let (cw, _) = b.text(
+                        Zone::Head,
+                        &group.count.to_string(),
+                        x + w + 4.0,
+                        head + 5.0,
+                        60.0,
+                        style(14.0, false, Ink::Muted),
+                    )?;
+                    let tab_w = w + 4.0 + cw;
                     if current {
                         b.shape(
                             Zone::Head,
-                            rect(x, head + h + 3.0, w, 2.0),
+                            rect(x, head + 28.0, tab_w, 2.0),
                             1.0,
                             Fill::Accent,
                         );
                     }
                     b.hit(
                         Zone::Head,
-                        rect(x - 4.0, head - 4.0, w + 8.0, h + 12.0),
+                        rect(x - 4.0, head, tab_w + 8.0, 30.0),
                         Action::Tab(index),
                     );
-                    x += w + 16.0;
+                    x += tab_w + 20.0;
                 }
-                head += 28.0;
+                head += 30.0;
             } else {
-                head += 2.0;
+                head += 8.0;
             }
 
-            y = 2.0;
-            let x = PAD + 6.0;
+            y = 6.0;
             let row_w = WIDTH - 16.0;
-            let inner = WIDTH - x - PAD - 2.0;
+            let tx = TEXT_X;
+            let tw = WIDTH - PAD - tx;
             for (index, definition) in view.visible().into_iter().enumerate() {
                 let top = y;
                 y += 8.0;
-                let number = format!("{}", index + 1);
-                let (_, _) = b.text(
-                    Zone::Body,
-                    &number,
-                    20.0,
-                    y + 2.0,
-                    14.0,
-                    style(12.0, false, Ink::Muted),
-                )?;
-                let tx = x + 16.0;
-                let tw = inner - 16.0;
-                if !definition.translation.trim().is_empty() {
-                    let (_, h) = b.text(
+                // First line: the translation (or the English-only tag) left, source and
+                // example count right.
+                let meta = [
+                    (!definition.source.is_empty()).then(|| source_label(&definition.source)),
+                    (!definition.examples.is_empty())
+                        .then(|| format!("例句 {}", definition.examples.len())),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ");
+                let meta_piece = b.frame.pieces.len();
+                let (meta_w, meta_h) = if meta.is_empty() {
+                    (0.0, 0.0)
+                } else {
+                    b.text(
+                        Zone::Body,
+                        &meta,
+                        0.0,
+                        0.0,
+                        tw,
+                        style(12.5, false, Ink::Muted),
+                    )?
+                };
+                let left_w = tw - if meta.is_empty() { 0.0 } else { meta_w + 12.0 };
+                let first_h = if !definition.translation.trim().is_empty() {
+                    b.text(
                         Zone::Body,
                         &definition.translation,
                         tx,
                         y,
-                        tw,
-                        style(15.0, true, Ink::Strong),
-                    )?;
-                    y += h + 2.0;
+                        left_w,
+                        style(15.5, true, Ink::Strong).lines(1.35),
+                    )?
+                    .1
                 } else if view.coverage == Coverage::Partial {
-                    let (_, h) = b.text(
+                    let pieces = b.frame.pieces.len();
+                    let (w, h) = b.text(
                         Zone::Body,
-                        "英文释义",
-                        tx,
-                        y,
-                        tw,
+                        "仅英文",
+                        0.0,
+                        0.0,
+                        80.0,
                         style(12.0, false, Ink::Muted),
                     )?;
-                    y += h + 2.0;
+                    b.frame.pieces[pieces].x = tx + 5.0;
+                    b.frame.pieces[pieces].y = y + 2.0;
+                    b.shape(
+                        Zone::Body,
+                        rect(tx, y + 1.0, w + 10.0, h + 2.0),
+                        4.0,
+                        Fill::Row,
+                    );
+                    h + 4.0
+                } else {
+                    0.0
+                };
+                let first_h = first_h.max(meta_h);
+                if !meta.is_empty() {
+                    let piece = &mut b.frame.pieces[meta_piece];
+                    piece.x = WIDTH - PAD - meta_w;
+                    piece.y = y + (first_h.min(22.0) - meta_h) / 2.0 + 1.0;
+                }
+                if first_h > 0.0 {
+                    y += first_h + 2.0;
                 }
                 let meaning = if definition.text.trim().is_empty()
                     && definition.translation.trim().is_empty()
@@ -958,11 +1013,12 @@ pub fn build(
                         tx,
                         y,
                         tw,
-                        style(13.0, false, Ink::Soft),
+                        style(14.0, false, Ink::Soft).lines(1.45),
                     )?;
                     y += h;
                 }
                 if view.expanded == Some(index) {
+                    y += 4.0;
                     for example in &definition.examples {
                         y += 6.0;
                         let (_, h) = b.text(
@@ -971,7 +1027,7 @@ pub fn build(
                             tx,
                             y,
                             tw,
-                            style(13.0, false, Ink::Muted),
+                            style(13.5, false, Ink::Soft).lines(1.45),
                         )?;
                         y += h;
                         if !example.translation.trim().is_empty() {
@@ -981,34 +1037,11 @@ pub fn build(
                                 tx,
                                 y,
                                 tw,
-                                style(13.0, false, Ink::Muted),
+                                style(13.5, false, Ink::Muted).lines(1.45),
                             )?;
                             y += h;
                         }
                     }
-                } else if !definition.examples.is_empty() {
-                    y += 2.0;
-                    let (_, h) = b.text(
-                        Zone::Body,
-                        &format!("例句 {} →", definition.examples.len()),
-                        tx,
-                        y,
-                        tw,
-                        style(12.0, false, Ink::Muted),
-                    )?;
-                    y += h;
-                }
-                if !definition.source.is_empty() {
-                    y += 2.0;
-                    let (_, h) = b.text(
-                        Zone::Body,
-                        &source_label(&definition.source),
-                        tx,
-                        y,
-                        tw,
-                        style(12.0, false, Ink::Muted),
-                    )?;
-                    y += h;
                 }
                 y += 8.0;
                 let row = rect(8.0, top, row_w, y - top);
@@ -1016,14 +1049,13 @@ pub fn build(
                 if index == view.selected {
                     b.shape(
                         Zone::Body,
-                        rect(12.0, top + 11.0, 3.0, y - top - 22.0),
+                        rect(13.0, top + 11.0, 3.0, y - top - 22.0),
                         1.5,
                         Fill::Accent,
                     );
                     b.frame.selected = Some((top, y));
                 }
                 b.hit(Zone::Body, row, Action::Sense(index));
-                y += 2.0;
             }
             if view.entry.definitions.is_empty() {
                 let (_, h) = b.text(
@@ -1041,27 +1073,25 @@ pub fn build(
             b.frame.has_foot = true;
             b.text(
                 Zone::Foot,
-                if view.has_sound() {
-                    "↑↓ 选择   → 例句   Ctrl+P 发音   Esc 关闭"
-                } else {
-                    "↑↓ 选择   → 例句   Esc 关闭"
-                },
+                "↑↓ 选择 · → 例句",
                 PAD,
-                9.0,
-                WIDTH - PAD * 2.0 - 66.0,
-                style(12.0, false, Ink::Muted),
+                10.0,
+                WIDTH - PAD * 2.0 - 80.0,
+                style(12.5, false, Ink::Muted),
             )?;
+            let pieces = b.frame.pieces.len();
             let (w, _) = b.text(
                 Zone::Foot,
                 "原词典 ↗",
-                WIDTH - PAD - 60.0,
-                9.0,
-                60.0,
-                style(12.0, false, Ink::Accent),
+                0.0,
+                10.0,
+                100.0,
+                style(12.5, false, Ink::Accent),
             )?;
+            b.frame.pieces[pieces].x = WIDTH - PAD - w;
             b.hit(
                 Zone::Foot,
-                rect(WIDTH - PAD - 66.0, 0.0, w + 12.0, FOOT_H),
+                rect(WIDTH - PAD - w - 6.0, 0.0, w + 12.0, FOOT_H),
                 Action::Open(view.entry.source_url.clone()),
             );
         }
@@ -1099,7 +1129,7 @@ pub fn paint(p: Paint) -> Result<()> {
         scroll,
         mouse,
     } = p;
-    let hovered = mouse.and_then(|(x, y)| frame.hovered_row(x, y, scroll));
+    let hovered = mouse.and_then(|(x, y)| frame.hovered(x, y, scroll));
     unsafe {
         let brush = |rgb: u32, a: f32| target.CreateSolidColorBrush(&color(rgb, a), None);
         let ink = brush(theme.ink, 1.0)?;
@@ -1142,12 +1172,13 @@ pub fn paint(p: Paint) -> Result<()> {
         let body_h = frame.visible_body();
         let foot_top = body_top + body_h;
         let draw = |zone: Zone, dy: f32| {
-            if let (Zone::Body, Some(r)) = (zone, hovered) {
+            if let Some((_, r)) = hovered.filter(|(hovered, _)| *hovered == zone) {
+                let radius = if zone == Zone::Head { 8.0 } else { 10.0 };
                 target.FillRoundedRectangle(
                     &D2D1_ROUNDED_RECT {
                         rect: moved(r, 0.0, dy),
-                        radiusX: 9.0,
-                        radiusY: 9.0,
+                        radiusX: radius,
+                        radiusY: radius,
                     },
                     &row,
                 );
@@ -1186,19 +1217,21 @@ pub fn paint(p: Paint) -> Result<()> {
         );
         draw(Zone::Head, 0.0);
         if let Some(caret_x) = frame.caret_x {
-            target.FillRectangle(&rect(caret_x, 16.0, 1.5, 22.0), &accent);
+            target.FillRectangle(&rect(caret_x, 15.0, 1.5, 22.0), &accent);
         }
         target.PopAxisAlignedClip();
-        target.DrawLine(
-            Vector2 { X: 0.0, Y: INPUT_H },
-            Vector2 {
-                X: WIDTH,
-                Y: INPUT_H,
-            },
-            &line,
-            1.0,
-            None,
-        );
+        // Under the input row, and under an entry's header when it has one.
+        for y in [INPUT_H, frame.head_h] {
+            if y == INPUT_H || y > INPUT_H + 1.0 {
+                target.DrawLine(
+                    Vector2 { X: 0.0, Y: y },
+                    Vector2 { X: WIDTH, Y: y },
+                    &line,
+                    1.0,
+                    None,
+                );
+            }
+        }
 
         if body_h > 0.0 {
             target.PushAxisAlignedClip(

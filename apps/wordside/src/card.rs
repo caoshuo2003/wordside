@@ -1,11 +1,12 @@
 //! What the card shows and how keys move through it. No drawing and no Windows calls here.
 use crate::{
-    entry::{identity, word_url, Definition, Entry, LookupError},
+    entry::{identity, word_url, Definition, Entry, LookupError, Pronunciation},
     presentation::{
         lookup_notice, pos_label, pronunciation_chips, Notice, NoticeAction, PronunciationChip,
         INVALID_INPUT,
     },
 };
+use std::ops::Range;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct PosGroup {
@@ -35,7 +36,10 @@ pub enum Sound {
 pub struct EntryView {
     pub entry: Entry,
     pub groups: Vec<PosGroup>,
+    /// Every reading, grouped by part of speech in tab order; `tab_chips` says which belong
+    /// to each tab.
     pub chips: Vec<PronunciationChip>,
+    tab_chips: Vec<Range<usize>>,
     pub sounds: Vec<Sound>,
     last_sound: Option<usize>,
     pub coverage: Coverage,
@@ -69,13 +73,14 @@ impl EntryView {
             (_, 0) => Coverage::English,
             _ => Coverage::Partial,
         };
-        let chips = pronunciation_chips(&entry.pronunciation);
+        let (chips, tab_chips) = chips_by_tab(&entry.pronunciation, &groups);
         Self {
             entry,
             groups,
             sounds: vec![Sound::Idle; chips.len()],
             last_sound: None,
             chips,
+            tab_chips,
             coverage,
             tab: 0,
             selected: 0,
@@ -142,16 +147,20 @@ impl EntryView {
             .filter(|url| !url.is_empty())
     }
 
-    pub fn has_sound(&self) -> bool {
-        (0..self.chips.len()).any(|index| self.sound_url(index).is_some())
+    /// The readings shown with the current part of speech, as indexes into `chips`.
+    pub fn tab_chips(&self) -> Range<usize> {
+        self.tab_chips.get(self.tab).cloned().unwrap_or(0..0)
     }
 
-    /// Ctrl+P: the next chip with a sound after the one played last, wrapping around.
+    /// Ctrl+P: the next shown reading with a sound after the one played last, wrapping around.
     pub fn next_sound(&self) -> Option<usize> {
-        let count = self.chips.len();
-        let start = self.last_sound.map_or(0, |index| index + 1);
-        (0..count)
-            .map(|step| (start + step) % count)
+        let shown: Vec<usize> = self.tab_chips().collect();
+        let start = self
+            .last_sound
+            .and_then(|last| shown.iter().position(|&index| index == last))
+            .map_or(0, |position| position + 1);
+        (0..shown.len())
+            .map(|step| shown[(start + step) % shown.len()])
             .find(|&index| self.sound_url(index).is_some())
     }
 
@@ -173,6 +182,43 @@ impl EntryView {
             }
         }
     }
+}
+
+/// Readings per part of speech, the way Cambridge lists them under each heading. Readings
+/// whose part of speech has no tab go with the first tab, and a tab without readings of its
+/// own shows the first tab's, so none is ever out of reach.
+fn chips_by_tab(
+    list: &[Pronunciation],
+    groups: &[PosGroup],
+) -> (Vec<PronunciationChip>, Vec<Range<usize>>) {
+    if groups.is_empty() {
+        let all = pronunciation_chips(list);
+        let count = all.len();
+        return (all, std::iter::once(0..count).collect());
+    }
+    let key = |item: &Pronunciation| pos_label(&item.pos).1;
+    let mut chips = Vec::new();
+    let mut ranges = Vec::new();
+    for (index, group) in groups.iter().enumerate() {
+        let items: Vec<Pronunciation> = list
+            .iter()
+            .filter(|item| {
+                let own = key(item);
+                own == group.key || (index == 0 && !groups.iter().any(|other| other.key == own))
+            })
+            .cloned()
+            .collect();
+        let start = chips.len();
+        chips.extend(pronunciation_chips(&items));
+        ranges.push(start..chips.len());
+    }
+    let first = ranges[0].clone();
+    for range in &mut ranges {
+        if range.start == range.end {
+            *range = first.clone();
+        }
+    }
+    (chips, ranges)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -430,11 +476,99 @@ mod tests {
         EntryView::new(read_api_entry(&json!({"entry":{"word":"run","pos":[],"definition":[],"pronunciation":pronunciation}}), "run", "en-cn").unwrap())
     }
 
+    fn spoken(pronunciation: serde_json::Value, definitions: Vec<serde_json::Value>) -> EntryView {
+        EntryView::new(read_api_entry(&json!({"entry":{"word":"record","pos":[],"definition":definitions,"pronunciation":pronunciation}}), "record", "en-cn").unwrap())
+    }
+    fn shown(card: &EntryView) -> Vec<(String, String)> {
+        card.tab_chips()
+            .map(|index| {
+                (
+                    card.chips[index].lang.clone(),
+                    card.chips[index].pron.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn readings_follow_the_part_of_speech_tab() {
+        let site = "https://dictionary.cambridge.org/media/";
+        let mut card = spoken(
+            json!([
+                {"pos":"noun","lang":"uk","pron":"/ˈrek.ɔːd/","url":format!("{site}n-uk.mp3")},
+                {"pos":"noun","lang":"us","pron":"/ˈrek.ɚd/","url":format!("{site}n-us.mp3")},
+                {"pos":"verb","lang":"uk","pron":"/rɪˈkɔːd/","url":format!("{site}v-uk.mp3")},
+                {"pos":"verb","lang":"us","pron":"/rɪˈkɔːrd/","url":format!("{site}v-us.mp3")}
+            ]),
+            vec![
+                definition("noun [ C ]", "记录"),
+                definition("verb [ T ]", "录音"),
+            ],
+        );
+        assert_eq!(
+            shown(&card),
+            [
+                ("英".into(), "/ˈrek.ɔːd/".into()),
+                ("美".into(), "/ˈrek.ɚd/".into())
+            ]
+        );
+        card.next_tab();
+        assert_eq!(
+            shown(&card),
+            [
+                ("英".into(), "/rɪˈkɔːd/".into()),
+                ("美".into(), "/rɪˈkɔːrd/".into())
+            ]
+        );
+        assert_eq!(card.chips.len(), 4, "every reading is still there");
+    }
+
+    #[test]
+    fn no_reading_is_out_of_reach_when_parts_of_speech_disagree() {
+        let site = "https://dictionary.cambridge.org/media/";
+        // Readings only under "adjective", which has no definitions; definitions under two tabs.
+        let card = spoken(
+            json!([{"pos":"adjective","lang":"uk","pron":"/a/","url":format!("{site}a.mp3")}]),
+            vec![definition("noun", "名"), definition("verb", "动")],
+        );
+        let mut card = card;
+        assert_eq!(
+            shown(&card),
+            [("英".into(), "/a/".into())],
+            "orphans join the first tab"
+        );
+        card.next_tab();
+        assert_eq!(
+            shown(&card),
+            [("英".into(), "/a/".into())],
+            "an empty tab shows the first tab's"
+        );
+    }
+
+    #[test]
+    fn ctrl_p_stays_within_the_shown_readings() {
+        let site = "https://dictionary.cambridge.org/media/";
+        let mut card = spoken(
+            json!([
+                {"pos":"noun","lang":"uk","pron":"/n1/","url":format!("{site}1.mp3")},
+                {"pos":"noun","lang":"us","pron":"/n2/","url":format!("{site}2.mp3")},
+                {"pos":"verb","lang":"uk","pron":"/v1/","url":format!("{site}3.mp3")}
+            ]),
+            vec![definition("noun", "名"), definition("verb", "动")],
+        );
+        assert_eq!(card.next_sound(), Some(0));
+        card.set_sound(0, Sound::Loading);
+        assert_eq!(card.next_sound(), Some(1));
+        card.set_sound(1, Sound::Loading);
+        assert_eq!(card.next_sound(), Some(0), "wraps within the noun readings");
+        card.next_tab();
+        assert_eq!(card.next_sound(), Some(2));
+    }
+
     #[test]
     fn ctrl_p_cycles_through_chips_that_have_a_sound() {
         let base = "https://dictionary.cambridge.org/media/";
         let mut card = voiced(&[&format!("{base}a.mp3"), "", &format!("{base}c.mp3")]);
-        assert!(card.has_sound());
         assert_eq!(card.next_sound(), Some(0));
         card.set_sound(0, Sound::Loading);
         assert_eq!(
@@ -444,7 +578,7 @@ mod tests {
         );
         card.set_sound(2, Sound::Loading);
         assert_eq!(card.next_sound(), Some(0));
-        assert!(!voiced(&[""]).has_sound());
+        assert_eq!(voiced(&[""]).next_sound(), None, "no reading has a sound");
         assert_eq!(voiced(&[]).next_sound(), None);
     }
 

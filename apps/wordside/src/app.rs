@@ -28,7 +28,7 @@ use std::{
     time::Instant,
 };
 use windows::{
-    core::{s, w, Result, BOOL, HSTRING},
+    core::{s, w, Interface, Result, BOOL, HSTRING},
     Win32::{
         Foundation::*,
         Graphics::{
@@ -74,6 +74,8 @@ const CLASS: windows::core::PCWSTR = w!("WordSideCard");
 /// Its existence marks the running copy; signalling it asks that copy to show the card.
 const INSTANCE: windows::core::PCWSTR = w!("Local\\WordSide-local.wordside.dictionary.api-preview");
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
+/// Grayscale contrast for text on glass; Windows' default is 1.0.
+const GLASS_TEXT_CONTRAST: f32 = 1.6;
 
 type Answer = (u64, String, Result2);
 type Result2 = std::result::Result<Entry, LookupError>;
@@ -329,7 +331,25 @@ impl App {
                 pixelSize: size,
                 presentOptions: D2D1_PRESENT_OPTIONS_NONE,
             };
-            self.target = Some(self.d2d.CreateHwndRenderTarget(&props, &hwnd_props)?);
+            let target = self.d2d.CreateHwndRenderTarget(&props, &hwnd_props)?;
+            // Glass rules out ClearType, and grayscale text comes out thin; more contrast
+            // gives the strokes back their weight.
+            if self.glass {
+                if let Ok(factory) = self.dwrite.cast::<IDWriteFactory1>() {
+                    let defaults = self.dwrite.CreateRenderingParams()?;
+                    if let Ok(params) = factory.CreateCustomRenderingParams(
+                        defaults.GetGamma(),
+                        defaults.GetEnhancedContrast(),
+                        GLASS_TEXT_CONTRAST,
+                        0.0,
+                        DWRITE_PIXEL_GEOMETRY_FLAT,
+                        DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+                    ) {
+                        target.SetTextRenderingParams(&params);
+                    }
+                }
+            }
+            self.target = Some(target);
         }
         Ok(())
     }
@@ -523,6 +543,8 @@ impl App {
                 self.rebuild();
             }
             Action::Tab(tab) => {
+                // The readings change with the tab, so whatever plays belongs to the old one.
+                self.stop_sound();
                 if let Content::Entry(view) = &mut self.content {
                     view.select_tab(tab);
                     self.scroll = 0.0;
@@ -595,14 +617,19 @@ impl App {
                 }
                 self.rebuild();
             }
+        } else if key == VK_TAB.0 {
+            // The readings change with the tab, so whatever plays belongs to the old one.
+            self.stop_sound();
+            if let Content::Entry(view) = &mut self.content {
+                view.next_tab();
+                self.scroll = 0.0;
+                self.rebuild();
+            }
         } else if let Content::Entry(view) = &mut self.content {
             if key == VK_DOWN.0 || key == VK_UP.0 {
                 view.move_selection(if key == VK_DOWN.0 { 1 } else { -1 });
             } else if key == VK_RIGHT.0 || key == VK_LEFT.0 {
                 view.set_expanded(key == VK_RIGHT.0);
-            } else if key == VK_TAB.0 {
-                view.next_tab();
-                self.scroll = 0.0;
             } else {
                 return;
             }
