@@ -13,7 +13,11 @@
 
 **WordSide · 词伴** 是一款 Windows 划词词典，帮你在阅读时就近查看 Cambridge Dictionary 的释义、音标、例句与发音。开启自动划词后，选中英文单词，旁边就会弹出一张玻璃质感的小卡片；也可以按快捷键主动查询。
 
-**0.3.0 是重写的新一代**：整个程序用 Rust 原生重写，只有一个约 4 MB 的 exe，不再需要 WebView2 和安装；平时只在托盘待命，几乎不占内存。界面换成一张拟态玻璃卡片。[查看本版变化](docs/releases/v0.3.0.md)
+<p align="center">
+  <img src="docs/images/demo.gif" width="720" alt="选中 record，WordSide 的卡片在单词下方出现，显示音标、词性和中英释义">
+</p>
+
+**0.3.0 是重写的新一代**：整个程序用 Rust 原生重写，只有一个约 4 MB 的 exe，不再需要 WebView2，安装包也只有约 1.6 MB；平时只在托盘待命，几乎不占内存。界面换成一张拟态玻璃卡片。[查看本版变化](docs/releases/v0.3.0.md)
 
 ## 下载与开始
 
@@ -21,18 +25,32 @@
 
 | 方式 | 下载 | 使用方式 |
 |---|---|---|
-| 单个程序 · 推荐 | [WordSide_0.3.0.exe](https://github.com/caoshuo2003/wordside/releases/download/v0.3.0/WordSide_0.3.0.exe) | 放到任意文件夹，双击运行 |
+| 安装版 · 推荐 | [Windows x64 安装包](https://github.com/caoshuo2003/wordside/releases/download/v0.3.0/WordSide_0.3.0_x64-setup.exe) | 按提示安装，开始菜单里有 WordSide，可选开机自动启动 |
+| 单个程序 | [WordSide_0.3.0.exe](https://github.com/caoshuo2003/wordside/releases/download/v0.3.0/WordSide_0.3.0.exe) | 放到任意文件夹，双击运行 |
 | 便携包 | [ZIP 压缩包](https://github.com/caoshuo2003/wordside/releases/download/v0.3.0/WordSide_0.3.0-portable.zip) | 解压后运行其中的程序，包内附使用说明和第三方许可 |
 
-需要 **Windows x64** 和能访问 Cambridge 的网络。程序没有数字签名，第一次运行时 Windows 可能提示“已保护你的电脑”，点“更多信息”→“仍要运行”。
+需要 **Windows x64** 和能访问 Cambridge 的网络。安装版只装给当前用户，不需要管理员权限。程序没有数字签名，Windows 可能提示“已保护你的电脑”，点“更多信息”→“仍要运行”。
 
 1. 运行后 WordSide 在任务栏右下角的托盘待命，不会弹出窗口。左键点托盘图标，可以直接输入单词查询。
 2. 想选中就查，在托盘右键菜单里勾选“自动划词”；想自己触发，选中单词后按 **Ctrl+Alt+A**。快捷键可以在卡片的设置里修改。
-3. 从 0.2.0 升级：先在托盘右键退出 0.2.0；用过安装版的，可以在 Windows“已安装的应用”里卸载它。快捷键、自动划词和外观设置会沿用。
+3. 从 0.2.0 升级：先在托盘右键退出 0.2.0，再运行 0.3.0 的安装包，它会自动替换已安装的 0.2.0。快捷键、自动划词和外观设置会沿用。
 
 [完整使用指南](docs/USER-GUIDE.md) · [运行问题](docs/FAQ.md#安装与运行) · [取词与已知限制](docs/FAQ.md#取词与快捷键) · [隐私与数据](docs/PRIVACY.md) · [本版说明](docs/releases/v0.3.0.md)
 
 ## 功能一览
+
+<table>
+  <tr>
+    <td><img src="docs/images/preview-light.png" alt="浅色：选中 record 后弹出的卡片"></td>
+    <td><img src="docs/images/preview-dark.png" alt="深色：同一张卡片"></td>
+  </tr>
+  <tr>
+    <td align="center">浅色</td>
+    <td align="center">深色</td>
+  </tr>
+</table>
+
+*真实截图，词条为示例数据。[图片说明](docs/SCREENSHOTS.md)*
 
 | 体验 | 使用方式 |
 |---|---|

@@ -232,6 +232,8 @@ impl Drop for Helper {
         }
     }
 }
+/// How long the clipboard backup may take before the lookup gives up on borrowing it.
+const BACKUP_BUDGET: Duration = Duration::from_millis(1500);
 struct Work {
     request: ProbeRequest,
     guard: Option<(Arc<AtomicU64>, u64)>,
@@ -533,8 +535,12 @@ impl Worker {
                     }
                     let mut backup_request = request.clone();
                     backup_request.text.origin = super::windows_text::TextOrigin::Backup;
+                    // Backing up asks the source of the clipboard to render every format:
+                    // Explorer for copied files, a browser for its page data. That took
+                    // close to 600 ms on a busy machine, where the address bar (no
+                    // UI Automation word to fall back on) then could not be read at all.
                     let prepared = backup_helper.as_mut().and_then(|backup| {
-                        backup.exchange(&backup_request, &current, Duration::from_millis(600))
+                        backup.exchange(&backup_request, &current, BACKUP_BUDGET)
                     });
                     report.backup = prepared.as_ref().and_then(|reply| reply.clipboard_failure);
                     outcome = if let Some(before) =

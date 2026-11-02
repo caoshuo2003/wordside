@@ -109,6 +109,7 @@ cargo build --manifest-path apps/wordside/Cargo.toml --release
   不要直接跑 `--ignored`：`helper_process`、`fixture_process`、`private_clipboard_process` 是给上面这些测试启动的子进程入口，单独运行会一直等输入。
 - 第三方许可要在正式编译前生成，否则 exe 里只有一行提示，`check-wordside.ps1` 会判为失败。
 - `check-wordside.ps1 -Runtime` 用临时设置目录启动程序，测托盘待命时的内存和空闲 CPU；不加 `-Runtime` 只做 CI 也能做的静态检查。
+- 安装版：`.\tools\build-installer.ps1 -Exe <exe> -Licenses apps\wordside\generated\THIRD-PARTY-LICENSES.txt -OutDir <目录>`，需要 NSIS（`scoop install extras/nsis`）。安装和卸载可以加 `/S` 静默运行；注意在 Claude 桌面版里运行会写进它的重定向目录，真实安装要在 Claude 外测。
 - 编译时 `build.rs` 用 Windows SDK 的 `rc.exe` 嵌入图标；没有 SDK 也能编译，只是 exe 没有图标。改了 `src/icon.rs` 的图形后用 `wordside.exe --export-icon apps\wordside\assets\wordside.ico` 重新导出。
 
 开发时的启动参数（会直接显示卡片，也不参与单实例）：
@@ -120,6 +121,7 @@ cargo build --manifest-path apps/wordside/Cargo.toml --release
 | `--first-paint` | 打印启动到首次绘制的毫秒数后退出 |
 | `--stay` | 失去焦点时不自动隐藏 |
 | `--light`、`--dark`、`--opaque`、`--gpu` | 强制外观、关闭玻璃、改用 GPU 渲染 |
+| `--dpi <n>` | 按指定 DPI 绘制，如 `--dpi 96` 在高分屏上看 1080p（100%）的效果 |
 | `--sound <file>` | 所有读音都播放这个本地文件，用于在访问不到 Cambridge 的电脑上测发音 |
 
 正常启动（不带参数）只在托盘待命，读写真实设置。
