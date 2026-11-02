@@ -69,7 +69,7 @@ pub struct Theme {
     warn: u32,
     row: Rgba,
     line: Rgba,
-    /// The selected row's raised tile, its highlight edge and the shadow under it.
+    /// The raised tile under the mouse, its highlight edge and the shadow under it.
     raised: Rgba,
     edge: Rgba,
     shadow: Rgba,
@@ -120,8 +120,6 @@ enum Fill {
     Accent,
     Muted,
     OnAccent,
-    Raised,
-    Shadow,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -425,32 +423,6 @@ impl Builder<'_> {
             self.hit(Zone::Head, rect(x, y, width, 28.0), Action::Sound(index));
         }
         Ok(width)
-    }
-
-    /// A raised tile: a soft shadow stepping out below, then a lighter fill with a thin
-    /// highlight edge. Inserted at `at` so it sits under shapes already added for the row.
-    fn raise(&mut self, zone: Zone, r: D2D_RECT_F, radius: f32, at: usize) {
-        let mut tile = Vec::new();
-        for (grow, drop) in [(2.5, 4.0), (1.0, 2.0), (0.0, 1.0)] {
-            tile.push(Shape {
-                rect: rect(
-                    r.left - grow,
-                    r.top - grow + drop,
-                    r.right - r.left + grow * 2.0,
-                    r.bottom - r.top + grow * 2.0,
-                ),
-                radius: radius + grow,
-                fill: Fill::Shadow,
-                zone,
-            });
-        }
-        tile.push(Shape {
-            rect: r,
-            radius,
-            fill: Fill::Raised,
-            zone,
-        });
-        self.frame.shapes.splice(at..at, tile);
     }
 
     fn shape(&mut self, zone: Zone, rect: D2D_RECT_F, radius: f32, fill: Fill) {
@@ -970,7 +942,6 @@ pub fn build(
             let tw = WIDTH - PAD - tx;
             for (index, definition) in view.visible().into_iter().enumerate() {
                 let top = y;
-                let shapes = b.frame.shapes.len();
                 y += 8.0;
                 // First line: the translation (or the English-only tag) left; the source and,
                 // when there are examples, an accent "例句 N" with an arrow on the right, so
@@ -1114,10 +1085,9 @@ pub fn build(
                 }
                 y += 8.0;
                 let row = rect(8.0, top, row_w, y - top);
-                // The selected row floats: a raised glass tile under this row's own shapes,
-                // plus its accent bar. Other rows only tint under the mouse.
+                // The selected row gets its accent bar; whichever row the mouse is over
+                // floats up as a glass tile, drawn at paint time.
                 if index == view.selected {
-                    b.raise(Zone::Body, row, 10.0, shapes);
                     b.shape(
                         Zone::Body,
                         rect(13.0, top + 11.0, 3.0, y - top - 22.0),
@@ -1227,8 +1197,6 @@ pub fn paint(p: Paint) -> Result<()> {
             Fill::Accent => &accent,
             Fill::Muted => &muted,
             Fill::OnAccent => &on_accent,
-            Fill::Raised => &raised,
-            Fill::Shadow => &shadow,
         };
 
         target.BeginDraw();
@@ -1249,28 +1217,43 @@ pub fn paint(p: Paint) -> Result<()> {
         let foot_top = body_top + body_h;
         let draw = |zone: Zone, dy: f32| {
             if let Some((_, r)) = hovered.filter(|(hovered, _)| *hovered == zone) {
-                let radius = if zone == Zone::Head { 8.0 } else { 10.0 };
-                target.FillRoundedRectangle(
-                    &D2D1_ROUNDED_RECT {
-                        rect: moved(r, 0.0, dy),
+                let r = moved(r, 0.0, dy);
+                if zone == Zone::Head {
+                    // The readings are small; a plain tint is enough there.
+                    target.FillRoundedRectangle(
+                        &D2D1_ROUNDED_RECT {
+                            rect: r,
+                            radiusX: 8.0,
+                            radiusY: 8.0,
+                        },
+                        &row,
+                    );
+                } else {
+                    // A row under the mouse floats up: a soft shadow stepping out below,
+                    // then a lighter glass tile with a thin highlight edge.
+                    let radius = 10.0;
+                    for (grow, drop) in [(2.5, 4.0), (1.0, 2.0), (0.0, 1.0)] {
+                        target.FillRoundedRectangle(
+                            &D2D1_ROUNDED_RECT {
+                                rect: rect(
+                                    r.left - grow,
+                                    r.top - grow + drop,
+                                    r.right - r.left + grow * 2.0,
+                                    r.bottom - r.top + grow * 2.0,
+                                ),
+                                radiusX: radius + grow,
+                                radiusY: radius + grow,
+                            },
+                            &shadow,
+                        );
+                    }
+                    let tile = D2D1_ROUNDED_RECT {
+                        rect: r,
                         radiusX: radius,
                         radiusY: radius,
-                    },
-                    &row,
-                );
-            }
-            for shape in frame.shapes.iter().filter(|s| s.zone == zone) {
-                let mut r = shape.rect;
-                r.top += dy;
-                r.bottom += dy;
-                let rounded = D2D1_ROUNDED_RECT {
-                    rect: r,
-                    radiusX: shape.radius,
-                    radiusY: shape.radius,
-                };
-                target.FillRoundedRectangle(&rounded, fill_of(shape.fill));
-                if shape.fill == Fill::Raised {
-                    // The highlight edge, half a pixel in so it stays sharp.
+                    };
+                    target.FillRoundedRectangle(&tile, &raised);
+                    // Half a pixel in, so the edge stays sharp.
                     let inner = D2D1_ROUNDED_RECT {
                         rect: rect(
                             r.left + 0.5,
@@ -1278,10 +1261,23 @@ pub fn paint(p: Paint) -> Result<()> {
                             r.right - r.left - 1.0,
                             r.bottom - r.top - 1.0,
                         ),
-                        ..rounded
+                        ..tile
                     };
                     target.DrawRoundedRectangle(&inner, &edge, 1.0, None);
                 }
+            }
+            for shape in frame.shapes.iter().filter(|s| s.zone == zone) {
+                let mut r = shape.rect;
+                r.top += dy;
+                r.bottom += dy;
+                target.FillRoundedRectangle(
+                    &D2D1_ROUNDED_RECT {
+                        rect: r,
+                        radiusX: shape.radius,
+                        radiusY: shape.radius,
+                    },
+                    fill_of(shape.fill),
+                );
             }
             for piece in frame.pieces.iter().filter(|p| p.zone == zone) {
                 let y = piece.y + dy;
