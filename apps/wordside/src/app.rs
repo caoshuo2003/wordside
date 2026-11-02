@@ -1344,6 +1344,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     tray::update(app.hwnd, app.tray_status());
                     app.report_blocked_hotkey();
                 });
+                // The capture thread has set up its hooks and UI Automation by now; hand back
+                // what that touched, as the trim at start-up did for the window.
+                if !IsWindowVisible(hwnd).as_bool() {
+                    let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+                }
                 LRESULT(0)
             }
             WM_TIMER if wparam.0 == LIFT_TIMER => {
