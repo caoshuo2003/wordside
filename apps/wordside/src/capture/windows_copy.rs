@@ -184,7 +184,25 @@ fn source_current(request: &TextRequest) -> bool {
 }
 fn source_owns(request: &TextRequest) -> bool {
     let owner = unsafe { GetClipboardOwner() };
-    owner != 0 && (pid(owner) == request.pid || root(owner) == root(request.window))
+    owner != 0
+        && owned_by_source(
+            pid(owner),
+            root(owner) == root(request.window),
+            request.pid,
+            (request.focus != 0).then(|| pid(request.focus)),
+        )
+}
+// A UWP app (Settings, Store apps) draws in a CoreWindow of its own process inside
+// ApplicationFrameHost's frame: the foreground window and request.pid are the frame
+// host's, while the focused CoreWindow and the clipboard owner are the app's. The focus
+// is checked against the source before any copy, so its process counts as the source.
+fn owned_by_source(
+    owner_pid: u32,
+    same_root: bool,
+    source_pid: u32,
+    focus_pid: Option<u32>,
+) -> bool {
+    owner_pid == source_pid || same_root || focus_pid.is_some_and(|focus| focus == owner_pid)
 }
 // The standard path remains source-owned Ctrl+Insert. Pebrel 2.2.1 has no
 // TextPattern or Ctrl+Insert binding; its Ctrl+Shift+C publishes ownerless text.
@@ -1445,6 +1463,17 @@ mod tests {
         ] {
             assert_eq!(profile_identity(class, image), expected);
         }
+    }
+    #[test]
+    fn uwp_copy_is_owned_by_the_focused_app_inside_the_frame_host() {
+        // Settings: frame host pid 17764, its CoreWindow and the clipboard owner 23324.
+        assert!(owned_by_source(23324, false, 17764, Some(23324)));
+        // Desktop apps, as before: the source process or a window under its root.
+        assert!(owned_by_source(500, false, 500, Some(500)));
+        assert!(owned_by_source(900, true, 500, None));
+        // Anyone else is still someone else's copy.
+        assert!(!owned_by_source(900, false, 500, Some(500)));
+        assert!(!owned_by_source(900, false, 500, None));
     }
     #[test]
     fn pebrel_chord_is_separate_and_all_synthetic_events_remain_tagged() {
