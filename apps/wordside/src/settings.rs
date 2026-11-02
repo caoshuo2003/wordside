@@ -11,7 +11,7 @@ use std::{
 
 /// Changing it would lose every user's settings; it is the folder 0.2.0 used.
 const IDENTIFIER: &str = "local.wordside.dictionary.api-preview";
-pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+A";
+pub const DEFAULT_HOTKEY: &str = crate::capture::shortcut::DEFAULT_HOTKEY;
 const THEMES: [&str; 3] = ["system", "light", "dark"];
 const KNOWN: [&str; 3] = ["enabled", "theme", "lookup_hotkey"];
 

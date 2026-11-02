@@ -2,8 +2,8 @@
 use crate::{
     entry::{identity, word_url, Definition, Entry, LookupError, Pronunciation},
     presentation::{
-        lookup_notice, pos_label, pronunciation_chips, Notice, NoticeAction, PronunciationChip,
-        INVALID_INPUT,
+        capture_notice, lookup_notice, pos_label, pronunciation_chips, Notice, NoticeAction,
+        PronunciationChip, INVALID_INPUT,
     },
 };
 use std::ops::Range;
@@ -238,6 +238,16 @@ impl FailureView {
             suggestions: error.suggestions.clone(),
             word: word.to_owned(),
             source_url,
+        }
+    }
+
+    /// A capture that found nothing to look up. The input row stays for typing the word.
+    pub fn capture(code: &str) -> Self {
+        Self {
+            notice: capture_notice(code),
+            suggestions: Vec::new(),
+            word: String::new(),
+            source_url: None,
         }
     }
 
@@ -726,7 +736,7 @@ mod tests {
         }
         // What the parser then makes of them, as 0.2.0 does.
         assert_eq!(
-            crate::shortcut::parse(&pressed_combo(true, true, false, 0x44).unwrap())
+            crate::capture::shortcut::parse(&pressed_combo(true, true, false, 0x44).unwrap())
                 .unwrap()
                 .unwrap()
                 .text,
@@ -737,7 +747,7 @@ mod tests {
             pressed_combo(false, false, true, 0x44),
             pressed_combo(true, false, false, 0xBC),
         ] {
-            assert!(crate::shortcut::parse(&refused.unwrap()).is_err());
+            assert!(crate::capture::shortcut::parse(&refused.unwrap()).is_err());
         }
     }
 

@@ -19,7 +19,7 @@ const FOOT_H: f32 = 36.0;
 /// Definitions and examples, from their left edge to the card's right padding.
 const TEXT_X: f32 = 26.0;
 /// The whole card stops growing here; the body scrolls instead.
-const MAX_CARD: f32 = 420.0;
+pub const MAX_CARD: f32 = 420.0;
 /// A tall header (many pronunciations) still leaves this much list in view.
 const MIN_BODY: f32 = 120.0;
 const FADE_H: f32 = 36.0;

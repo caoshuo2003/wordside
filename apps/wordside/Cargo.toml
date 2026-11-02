@@ -17,6 +17,10 @@ windows-numerics = "0.3"
 # Named directly because the `implement` macro (pronunciation callback) expands to it.
 windows-core = "0.62"
 
+[dev-dependencies]
+# Capture tests write their probe and status files into temporary folders.
+tempfile = "3"
+
 [dependencies.windows]
 version = "0.62"
 features = [
@@ -31,6 +35,10 @@ features = [
     "Win32_Graphics_Imaging",
     "Win32_System_Com_StructuredStorage",
     "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
     "Win32_System_DataExchange",
     "Win32_Media_MediaFoundation",
     "Win32_Security",

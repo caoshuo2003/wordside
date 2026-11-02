@@ -9,7 +9,6 @@ use super::{
     probe::{ProbeRequest, Worker},
     selection::Selection,
 };
-use crate::{hide_popup, State};
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -18,7 +17,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tauri::{Emitter, Manager, PhysicalPosition};
 type Handle = isize;
 #[derive(Clone, Copy, Default)]
 #[repr(C)]
@@ -33,13 +31,6 @@ struct Rect {
     top: i32,
     right: i32,
     bottom: i32,
-}
-#[repr(C)]
-struct MonitorInfo {
-    size: u32,
-    monitor: Rect,
-    work: Rect,
-    flags: u32,
 }
 #[derive(Default)]
 #[repr(C)]
@@ -66,9 +57,6 @@ extern "system" {
     fn GetGUIThreadInfo(thread: u32, info: *mut GuiInfo) -> i32;
     fn GetClipboardOwner() -> Handle;
     fn GetWindowRect(window: Handle, rect: *mut Rect) -> i32;
-    fn MonitorFromPoint(point: Point, flags: u32) -> Handle;
-    fn GetMonitorInfoW(monitor: Handle, info: *mut MonitorInfo) -> i32;
-    fn ShowWindow(window: Handle, command: i32) -> i32;
     fn IsWindowVisible(window: Handle) -> i32;
 }
 fn pid(window: Handle) -> u32 {
@@ -92,8 +80,10 @@ fn inside(window: Handle, p: Point) -> bool {
             && p.y < r.bottom
     }
 }
+/// Hands a finished capture to the card on the window's thread. The reply says whether it
+/// was consumed (published or rejected for good); `false` asks to try again later.
 fn show(
-    app: &AppHandle,
+    bridge: &Arc<Bridge>,
     point: Point,
     serial: u64,
     manual: bool,
@@ -104,14 +94,12 @@ fn show(
     compatibility: Option<Snapshot>,
     input_guard: Option<(Arc<AtomicU64>, u64)>,
     release: Option<(Activity, u64)>,
-    payload: serde_json::Value,
+    selection: Selection,
 ) -> Receiver<bool> {
     let (tx, reply) = channel();
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
+    let state = bridge.clone();
+    (bridge.post)(Box::new(move |card: &mut dyn Card| {
         let consumed = (|| {
-            let app = &handle;
-            let state = app.state::<State>();
             if state.capture_epoch.load(Ordering::SeqCst) != expected_epoch
                 || state.capture_serial.load(Ordering::SeqCst) != serial
                 || root_window(unsafe { GetForegroundWindow() }) != source
@@ -119,7 +107,7 @@ fn show(
             {
                 return true;
             }
-            if payload.get("word").is_some() && !focus_matches(source, focus) {
+            if matches!(selection, Selection::Word(_)) && !focus_matches(source, focus) {
                 return true;
             }
             if input_guard.as_ref().is_some_and(|(generation, expected)| {
@@ -135,81 +123,24 @@ fn show(
             if !manual && !state.enabled.load(Ordering::SeqCst) {
                 return true;
             }
-            // Cold WebViews can finish after the first selection. Keep only the
-            // current, source-validated candidate until its listeners are ready.
-            if !state.ready.load(Ordering::SeqCst) {
-                return false;
-            }
             if !publication_ready(release.as_ref()) || !sampled_released() {
                 return false;
             }
-            if let Some(window) = app.get_webview_window("popup") {
-                if !state.pinned.load(Ordering::SeqCst) {
-                    let scale = window
-                        .monitor_from_point(point.x as f64, point.y as f64)
-                        .ok()
-                        .flatten()
-                        .map(|m| m.scale_factor())
-                        .unwrap_or_else(|| window.scale_factor().unwrap_or(1.0));
-                    let mut info = MonitorInfo {
-                        size: std::mem::size_of::<MonitorInfo>() as u32,
-                        monitor: Rect::default(),
-                        work: Rect::default(),
-                        flags: 0,
-                    };
-                    let ok = unsafe { GetMonitorInfoW(MonitorFromPoint(point, 2), &mut info) };
-                    if ok != 0 {
-                        let preferred = state.settings.lock().unwrap().popup_size;
-                        let (width, height) = preferred.fit(
-                            scale,
-                            info.work.right - info.work.left,
-                            info.work.bottom - info.work.top,
-                        );
-                        let (x, y) = place(
-                            point.x,
-                            point.y,
-                            width as i32,
-                            height as i32,
-                            (
-                                info.work.left,
-                                info.work.top,
-                                info.work.right,
-                                info.work.bottom,
-                            ),
-                        );
-                        let desired =
-                            crate::popup_geometry::PopupSize::from_physical(width, height, scale)
-                                .unwrap_or(preferred);
-                        // Moving can itself trigger DPI/resize events. Register the final
-                        // size first, then always apply it in the target monitor's scale.
-                        state.popup_geometry.lock().unwrap().programmatic(desired);
-                        let _ = window.set_position(PhysicalPosition::new(x, y));
-                        let _ = window.set_size(tauri::LogicalSize::new(
-                            width as f64 / scale,
-                            height as f64 / scale,
-                        ));
-                    }
-                }
-                let event = if payload.get("word").is_some() {
-                    "native-selection"
-                } else {
-                    "native-selection-failed"
-                };
-                let mut payload = payload;
-                payload["serial"] = serde_json::json!(serial);
-                payload["manual"] = serde_json::json!(manual);
-                let _ = app.emit_to("popup", event, payload);
-                // Win32 explicitly shows the card without activating it or stealing the terminal's focus.
-                if let Ok(hwnd) = window.hwnd() {
-                    unsafe {
-                        ShowWindow(hwnd.0 as isize, 4);
-                    }
+            // The card places itself (unless pinned) and shows without taking the focus.
+            let at = (point.x, point.y);
+            match &selection {
+                Selection::Word(word) => card.captured(word, at, manual),
+                failure => {
+                    let (code, _) = failure
+                        .failure()
+                        .expect("failed capture has a user message");
+                    card.capture_failed(code, at, manual);
                 }
             }
             true
         })();
         let _ = tx.send(consumed);
-    });
+    }));
     reply
 }
 
@@ -326,33 +257,24 @@ fn current_source(window: Handle) -> Source {
     };
     Source { window, pid, focus }
 }
-fn begin(app: &AppHandle, serial: u64, manual: bool, expected_epoch: u64) {
-    let state = app.state::<State>();
-    state.popup_epoch.fetch_add(1, Ordering::SeqCst);
-    let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        if handle.state::<State>().capture_epoch.load(Ordering::SeqCst) != expected_epoch
-            || handle
-                .state::<State>()
-                .capture_serial
-                .load(Ordering::SeqCst)
-                != serial
+fn begin(bridge: &Arc<Bridge>, serial: u64, manual: bool, expected_epoch: u64) {
+    let state = bridge.clone();
+    (bridge.post)(Box::new(move |card: &mut dyn Card| {
+        if state.capture_epoch.load(Ordering::SeqCst) != expected_epoch
+            || state.capture_serial.load(Ordering::SeqCst) != serial
         {
             return;
         }
-        if !handle.state::<State>().pinned.load(Ordering::SeqCst) {
-            if let Some(window) = handle.get_webview_window("popup") {
-                super::hide(&window);
-            }
-        }
-        let _ = handle.emit_to(
-            "popup",
-            "native-capture-started",
-            serde_json::json!({"serial":serial,"manual":manual}),
-        );
-    });
+        card.capture_started(manual);
+    }));
 }
-fn invalidate(worker: &Worker, state: &State, serial: u64) {
+/// Clicked elsewhere: nothing in flight may show any more, and pinning ends with the card.
+fn dismiss(bridge: &Arc<Bridge>) {
+    bridge.capture_epoch.fetch_add(1, Ordering::SeqCst);
+    bridge.pinned.store(false, Ordering::SeqCst);
+    (bridge.post)(Box::new(|card: &mut dyn Card| card.dismiss()));
+}
+fn invalidate(worker: &Worker, state: &Bridge, serial: u64) {
     state.capture_serial.store(serial, Ordering::SeqCst);
     worker.cancel(serial);
 }
@@ -723,24 +645,17 @@ fn compatible(value: &Awaiting, snapshot: Snapshot, now: Instant) -> Candidate {
     )
 }
 
-pub fn run(app: AppHandle) {
-    let state = app.state::<State>();
-    let initial = super::shortcut::parse(&state.settings.lock().unwrap().lookup_hotkey);
+pub fn run(bridge: Arc<Bridge>, hotkey: String) {
+    let initial = super::shortcut::parse(&hotkey);
     let invalid = initial.as_ref().err().cloned();
-    let mut keys = Driver::new(state.hotkeys.clone(), initial.unwrap_or(None));
+    let mut keys = Driver::new(bridge.hotkeys.clone(), initial.unwrap_or(None));
     if let Some(error) = invalid {
-        state.hotkeys.set_error(error);
+        bridge.hotkeys.set_error(error);
     }
-    let _ = app.emit("native-state", crate::info(&state));
-    drop(state);
     let mut observer = match Observer::new(keys.input_binding()) {
         Ok(value) => Some(value),
-        Err(message) => {
-            let _ = app.emit_to(
-                "main",
-                "native-capture-feedback",
-                serde_json::json!({"code":"capture_unavailable","message":message}),
-            );
+        Err(_) => {
+            (bridge.post)(Box::new(|card: &mut dyn Card| card.capture_unavailable()));
             None
         }
     };
@@ -748,11 +663,7 @@ pub fn run(app: AppHandle) {
     // re-arm that changes nothing is retried at most this often.
     const REARM_INTERVAL: Duration = Duration::from_secs(30);
     let mut rearmed: Option<Instant> = None;
-    let (worker, answers) = Worker::new(
-        app.state::<State>()
-            .config
-            .with_file_name("capture-status.json"),
-    );
+    let (worker, answers) = Worker::new(bridge.status_file.clone());
     let mut capture = Capture::default();
     let mut capture_generation = 0;
     let mut released = Released::default();
@@ -767,15 +678,10 @@ pub fn run(app: AppHandle) {
     let mut source = 0;
     let mut dismissal = crate::dismissal::Dismissal::default();
     let mut observed_binding = keys.input_binding();
-    let mut observed_epoch = app.state::<State>().capture_epoch.load(Ordering::SeqCst);
+    let mut observed_epoch = bridge.capture_epoch.load(Ordering::SeqCst);
     loop {
-        let state = app.state::<State>();
-        let popup = app.get_webview_window("popup");
-        let popup_hwnd = popup
-            .as_ref()
-            .and_then(|w| w.hwnd().ok())
-            .map(|h| h.0 as isize)
-            .unwrap_or(0);
+        let state = &*bridge;
+        let popup_hwnd = bridge.card.load(Ordering::SeqCst);
         let enabled = state.enabled.load(Ordering::SeqCst);
         let was_visible = unsafe { IsWindowVisible(popup_hwnd) != 0 };
         Driver::wait(poll_interval(
@@ -819,7 +725,6 @@ pub fn run(app: AppHandle) {
         unsafe {
             GetCursorPos(&mut point);
         }
-        let state = app.state::<State>();
         let enabled = state.enabled.load(Ordering::SeqCst);
         let pinned = state.pinned.load(Ordering::SeqCst);
         let now = Instant::now();
@@ -828,7 +733,7 @@ pub fn run(app: AppHandle) {
         let mut epoch = state.capture_epoch.load(Ordering::SeqCst);
         if epoch != observed_epoch {
             serial = serial.wrapping_add(1);
-            invalidate(&worker, &state, serial);
+            invalidate(&worker, state, serial);
             capture.clear();
             awaiting = None;
             candidate = None;
@@ -836,7 +741,7 @@ pub fn run(app: AppHandle) {
         }
         if binding != observed_binding {
             serial = serial.wrapping_add(1);
-            invalidate(&worker, &state, serial);
+            invalidate(&worker, state, serial);
             capture.clear();
             awaiting = None;
             candidate = None;
@@ -847,7 +752,7 @@ pub fn run(app: AppHandle) {
             inputs.clear();
             capture.clear();
             serial = serial.wrapping_add(1);
-            invalidate(&worker, &state, serial);
+            invalidate(&worker, state, serial);
             awaiting = None;
             candidate = None;
         }
@@ -883,12 +788,12 @@ pub fn run(app: AppHandle) {
                 focus,
             },
         ) {
-            hide_popup(app.clone());
+            dismiss(&bridge);
             source = 0;
             epoch = state.capture_epoch.load(Ordering::SeqCst);
             observed_epoch = epoch;
             serial = serial.wrapping_add(1);
-            invalidate(&worker, &state, serial);
+            invalidate(&worker, state, serial);
             capture.clear();
             awaiting = None;
             candidate = None;
@@ -1073,7 +978,7 @@ pub fn run(app: AppHandle) {
             // Each captured physical key-down is a new request. Typematic is
             // already filtered by the hook; no same-window request dedup here.
             serial = serial.wrapping_add(1);
-            invalidate(&worker, &state, serial);
+            invalidate(&worker, state, serial);
             capture.manual();
             awaiting = None;
             candidate = None;
@@ -1106,10 +1011,10 @@ pub fn run(app: AppHandle) {
                 let latest = current_source(root_window(unsafe { GetForegroundWindow() }));
                 if !operation_valid(&value, latest, epoch, enabled, pinned) {
                     serial = serial.wrapping_add(1);
-                    invalidate(&worker, &state, serial);
+                    invalidate(&worker, state, serial);
                     candidate = focus_failure(value, latest, epoch, enabled, serial, now);
                     if let Some(value) = candidate.as_ref() {
-                        begin(&app, serial, true, value.epoch);
+                        begin(&bridge, serial, true, value.epoch);
                     }
                     continue;
                 }
@@ -1145,11 +1050,11 @@ pub fn run(app: AppHandle) {
             }) {
                 let value = awaiting.take().unwrap();
                 serial = serial.wrapping_add(1);
-                invalidate(&worker, &state, serial);
+                invalidate(&worker, state, serial);
                 capture.clear();
                 candidate = focus_failure(value, latest, epoch, enabled, serial, now);
                 if let Some(value) = candidate.as_ref() {
-                    begin(&app, serial, true, value.epoch);
+                    begin(&bridge, serial, true, value.epoch);
                 }
             }
         }
@@ -1166,7 +1071,7 @@ pub fn run(app: AppHandle) {
                 idle && release_stamp(observer.as_ref()) == input_stamp,
             ) {
                 Preparation::Ready => {
-                    begin(&app, value.serial, value.manual, value.epoch);
+                    begin(&bridge, value.serial, value.manual, value.epoch);
                     request(&worker, value);
                 }
                 Preparation::Cancelled => {
@@ -1174,7 +1079,7 @@ pub fn run(app: AppHandle) {
                 }
                 Preparation::Wait | Preparation::InFlight => {}
                 Preparation::Failed => {
-                    begin(&app, value.serial, value.manual, value.epoch);
+                    begin(&bridge, value.serial, value.manual, value.epoch);
                     value.failure = Some(Selection::SourceMismatch);
                 }
             }
@@ -1184,11 +1089,11 @@ pub fn run(app: AppHandle) {
                 .take()
                 .expect("dispatch rejection belongs to the current request");
             serial = serial.wrapping_add(1);
-            invalidate(&worker, &state, serial);
+            invalidate(&worker, state, serial);
             capture.clear();
             candidate = focus_failure(value, latest, epoch, enabled, serial, now);
             if let Some(value) = candidate.as_ref() {
-                begin(&app, serial, true, value.epoch);
+                begin(&bridge, serial, true, value.epoch);
             }
         }
         if awaiting.as_ref().is_some_and(|v| v.failure.is_some()) {
@@ -1238,21 +1143,12 @@ pub fn run(app: AppHandle) {
                 {
                     source = value.window;
                     dismissal.showing();
-                    let payload = match &value.selection {
-                        Selection::Word(word) => serde_json::json!({"word":word}),
-                        failure => {
-                            let (code, message) = failure
-                                .failure()
-                                .expect("failed capture has a user message");
-                            serde_json::json!({"code":code,"message":message})
-                        }
-                    };
                     let release = value
                         .release
                         .as_ref()
                         .and_then(|activity| input_stamp.map(|stamp| (activity.clone(), stamp)));
                     value.publication = Some(show(
-                        &app,
+                        &bridge,
                         value.point,
                         serial,
                         value.manual,
@@ -1263,7 +1159,7 @@ pub fn run(app: AppHandle) {
                         value.compatibility.clone(),
                         value.guard.clone(),
                         release,
-                        payload,
+                        value.selection.clone(),
                     ));
                 }
             }

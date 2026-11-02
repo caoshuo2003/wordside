@@ -3,9 +3,11 @@
 mod app;
 mod audio;
 mod cache;
+mod capture;
 mod card;
 mod cli;
 mod dictionary;
+mod dismissal;
 mod entry;
 mod icon;
 mod lookup;
@@ -15,13 +17,11 @@ mod render;
 mod selection_input;
 mod service;
 mod settings;
-// Copied unchanged from 0.2.0's capture layer; `HotkeyStatus` returns with capture in N3.
-#[allow(dead_code)]
-mod shortcut;
 mod tray;
 
 fn main() -> windows::core::Result<()> {
-    if cli::run() {
+    // The selection helper is this exe started by the capture layer; it opens no window.
+    if capture::probe::helper_entry() || cli::run() {
         return Ok(());
     }
     app::run()

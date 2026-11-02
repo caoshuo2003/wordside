@@ -1,6 +1,7 @@
 //! The window, the message loop and everything that reacts to input.
 use crate::{
     audio::{self, Player},
+    capture::{self, shortcut, Bridge, Card},
     card::{
         allowed_link, pressed_combo, sense_text, Content, EntryView, FailureView, SettingsChange,
         SettingsKey, SettingsView, Sound,
@@ -13,7 +14,6 @@ use crate::{
     selection_input::selected_word,
     service::Service,
     settings::{self, Settings},
-    shortcut,
     tray::{self, Command, WM_TRAY},
 };
 use serde_json::json;
@@ -22,7 +22,7 @@ use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicIsize, AtomicU32, AtomicU64, Ordering},
         Arc, Mutex, OnceLock,
     },
     time::Instant,
@@ -67,8 +67,11 @@ const WM_CLIP: u32 = WM_APP + 2;
 const WM_SOUND: u32 = WM_APP + 3;
 /// Another launch asks the running copy to show the card.
 const WM_SHOW: u32 = WM_APP + 5;
+/// The capture thread queued work for the card.
+const WM_CAPTURE: u32 = WM_APP + 6;
 const CF_UNICODETEXT: u32 = 13;
-const SHOW_HOTKEY: i32 = 1;
+/// A moment after start, says so if the saved shortcut could not be registered.
+const HOTKEY_CHECK_TIMER: usize = 3;
 const CLASS: windows::core::PCWSTR = w!("WordSideCard");
 /// Per session, named after the app identifier so it never collides with other apps.
 /// Its existence marks the running copy; signalling it asks that copy to show the card.
@@ -141,28 +144,41 @@ struct App {
     settings_path: Option<PathBuf>,
     /// The settings page, while it is open in place of the card.
     page: Option<SettingsView>,
-    /// Whether the saved shortcut is registered; another program may hold it.
-    hotkey_active: bool,
+    /// The capture thread's side of the state; None in development runs, which don't capture.
+    bridge: Option<Arc<Bridge>>,
+    /// The input hooks could not be installed, so automatic lookup can't work.
+    capture_down: bool,
+    /// The bottom edge (screen pixels) of a card that opened above a selection: it grows
+    /// upwards from there, so it stays beside the word as the entry comes in.
+    rise: Option<i32>,
     report_paint: Option<Instant>,
 }
 
-/// Registers the lookup shortcut written as in the settings file. An empty one is off,
-/// which counts as success. Until capture lands in N3 this is a plain `RegisterHotKey`.
-fn register_hotkey(hwnd: HWND, text: &str) -> bool {
-    unsafe {
-        let _ = UnregisterHotKey(Some(hwnd), SHOW_HOTKEY);
-        match shortcut::parse(text) {
-            Ok(Some(hotkey)) => RegisterHotKey(
-                Some(hwnd),
-                SHOW_HOTKEY,
-                HOT_KEY_MODIFIERS(hotkey.modifiers) | MOD_NOREPEAT,
-                hotkey.key,
-            )
-            .is_ok(),
-            Ok(None) => true,
-            Err(_) => false,
-        }
-    }
+/// Jobs the capture thread hands to the window's thread; `WM_CAPTURE` runs them.
+static JOBS: Mutex<Vec<capture::Job>> = Mutex::new(Vec::new());
+
+fn bridge_for(hwnd: HWND, settings: &Settings, status_file: PathBuf) -> Arc<Bridge> {
+    let window = hwnd.0 as isize;
+    Arc::new(Bridge {
+        enabled: AtomicBool::new(settings.enabled),
+        pinned: AtomicBool::new(false),
+        capture_epoch: AtomicU64::new(0),
+        capture_serial: AtomicU64::new(0),
+        card: AtomicIsize::new(window),
+        hotkeys: Arc::new(capture::hotkey::Control::default()),
+        status_file,
+        post: Box::new(move |job| {
+            JOBS.lock().unwrap().push(job);
+            unsafe {
+                let _ = PostMessageW(
+                    Some(HWND(window as *mut _)),
+                    WM_CAPTURE,
+                    WPARAM(0),
+                    LPARAM(0),
+                );
+            }
+        }),
+    })
 }
 
 fn flag(name: &str) -> bool {
@@ -294,15 +310,15 @@ impl App {
         let width = (WIDTH * scale).ceil() as i32;
         let height = (self.frame.height() * scale).ceil() as i32;
         unsafe {
-            let _ = SetWindowPos(
-                self.hwnd,
-                None,
-                0,
-                0,
-                width,
-                height,
-                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE,
-            );
+            let (x, y, flags) = match self.rise {
+                Some(bottom) => {
+                    let mut bounds = RECT::default();
+                    let _ = GetWindowRect(self.hwnd, &mut bounds);
+                    (bounds.left, bottom - height, SWP_NOZORDER | SWP_NOACTIVATE)
+                }
+                None => (0, 0, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE),
+            };
+            let _ = SetWindowPos(self.hwnd, None, x, y, width, height, flags);
             let _ = InvalidateRect(Some(self.hwnd), None, false);
         }
     }
@@ -557,6 +573,9 @@ impl App {
             }
             Action::Pin => {
                 self.pinned = !self.pinned;
+                if let Some(bridge) = &self.bridge {
+                    bridge.pinned.store(self.pinned, Ordering::SeqCst);
+                }
                 self.rebuild();
             }
             Action::Tab(tab) => {
@@ -684,19 +703,13 @@ impl App {
     }
 
     /// Hiding gives everything back: no render target, no layouts, trimmed working set.
+    /// The next show is the lookup card again.
     fn hide(&mut self) {
-        // The next show is the lookup card again.
-        if self.page.is_some() {
-            self.close_settings();
+        // A capture still in flight must not bring the card back.
+        if let Some(bridge) = &self.bridge {
+            bridge.capture_epoch.fetch_add(1, Ordering::SeqCst);
         }
-        self.stop_sound();
-        self.mouse = None;
-        self.target = None;
-        self.frame = Frame::default();
-        unsafe {
-            let _ = ShowWindow(self.hwnd, SW_HIDE);
-            let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
-        }
+        self.put_away();
     }
 
     /// The right-click menu for the point `at` (screen pixels), or for the selected row
@@ -771,24 +784,40 @@ impl App {
         saved
     }
 
+    /// As 0.2.0: whatever a capture in flight would show belongs to the old setting, and
+    /// turning it off puts away an unpinned card.
     fn toggle_auto(&mut self) {
         let mut next = self.settings.clone();
         next.enabled = !next.enabled;
         if self.save(next) {
+            if let Some(bridge) = &self.bridge {
+                bridge
+                    .enabled
+                    .store(self.settings.enabled, Ordering::SeqCst);
+                bridge.capture_epoch.fetch_add(1, Ordering::SeqCst);
+            }
             tray::update(self.hwnd, self.tray_status());
         }
+    }
+
+    /// The saved shortcut works, or there is none. Development runs don't capture, so they
+    /// have nothing to report either.
+    fn hotkey_active(&self) -> bool {
+        self.bridge.as_ref().is_none_or(|bridge| {
+            let status = bridge.hotkeys.status();
+            status.active || status.error.is_none()
+        })
     }
 
     fn tray_status(&self) -> tray::Status<'_> {
         let hotkey = self.settings.lookup_hotkey.as_str();
         tray::Status {
             enabled: self.settings.enabled,
-            blocked_hotkey: (!self.hotkey_active && !hotkey.is_empty()).then_some(hotkey),
+            blocked_hotkey: (!self.hotkey_active() && !hotkey.is_empty()).then_some(hotkey),
         }
     }
 
-    /// Another program may hold the saved shortcut. Say so where it can be seen: until N3's
-    /// keyboard hook takes over, a plain `RegisterHotKey` cannot share a combination.
+    /// Another program may hold the saved shortcut; say so where it can be seen.
     fn report_blocked_hotkey(&self) {
         if let Some(hotkey) = self.tray_status().blocked_hotkey {
             tray::warn(
@@ -814,8 +843,12 @@ impl App {
     }
 
     fn open_settings(&mut self) {
-        let notice = (!self.hotkey_active && !self.settings.lookup_hotkey.is_empty())
-            .then(|| shortcut_notice("占用").to_owned());
+        let notice = self
+            .bridge
+            .as_ref()
+            .and_then(|bridge| bridge.hotkeys.status().error)
+            .filter(|_| !self.settings.lookup_hotkey.is_empty())
+            .map(|error| shortcut_notice(&error).to_owned());
         self.page = Some(SettingsView {
             notice,
             ..Default::default()
@@ -841,10 +874,6 @@ impl App {
             SettingsChange::Theme(theme) => self.set_theme(theme),
             SettingsChange::StopRecording => self.stop_recording(),
             SettingsChange::Record => {
-                // Off while recording, so pressing the current combination records it too.
-                unsafe {
-                    let _ = UnregisterHotKey(Some(self.hwnd), SHOW_HOTKEY);
-                }
                 if let Some(page) = &mut self.page {
                     page.recording = true;
                     page.notice = None;
@@ -856,14 +885,37 @@ impl App {
         }
     }
 
-    /// Back to the shortcut that was saved.
     fn stop_recording(&mut self) {
-        self.hotkey_active = register_hotkey(self.hwnd, &self.settings.lookup_hotkey);
         if let Some(page) = &mut self.page {
             page.recording = false;
         }
         // The tooltip stops naming a blocked shortcut once a working one is saved.
         tray::update(self.hwnd, self.tray_status());
+    }
+
+    /// Registers `text` and saves it as one transaction, as 0.2.0 does: prepared on the
+    /// capture thread, saved, then committed; a failed save rolls the registration back.
+    fn apply_hotkey(&mut self, text: String) -> Option<String> {
+        let parsed = match shortcut::parse(&text) {
+            Ok(parsed) => parsed,
+            Err(error) => return Some(shortcut_notice(&error).into()),
+        };
+        let Some(bridge) = self.bridge.clone() else {
+            return Some(shortcut_notice("未响应").into());
+        };
+        let prepared = match bridge.hotkeys.prepare(parsed) {
+            Ok(prepared) => prepared,
+            Err(error) => return Some(shortcut_notice(&error).into()),
+        };
+        let mut next = self.settings.clone();
+        next.lookup_hotkey = text;
+        if !self.save(next) {
+            // Dropping the prepared registration puts the old shortcut back.
+            return Some("快捷键未能保存，请稍后再试。".into());
+        }
+        let committed = prepared.commit();
+        bridge.capture_epoch.fetch_add(1, Ordering::SeqCst);
+        committed.err().map(|error| shortcut_notice(&error).into())
     }
 
     /// A key while recording. The new shortcut replaces the old one only once it is both
@@ -893,20 +945,10 @@ impl App {
                 }
             }
         };
-        let notice = if !register_hotkey(self.hwnd, &text) {
-            Some(shortcut_notice("占用"))
-        } else {
-            let mut next = self.settings.clone();
-            next.lookup_hotkey = text;
-            if self.save(next) {
-                None
-            } else {
-                Some("快捷键未能保存，请稍后再试。")
-            }
-        };
+        let notice = self.apply_hotkey(text);
         self.stop_recording();
         if let Some(page) = &mut self.page {
-            page.notice = notice.map(str::to_owned);
+            page.notice = notice;
         }
         self.rebuild();
     }
@@ -931,12 +973,128 @@ impl App {
     }
 
     fn show(&mut self) {
+        self.rise = None;
         self.rebuild();
         self.fit();
         unsafe {
             let _ = ShowWindow(self.hwnd, SW_SHOW);
             let _ = SetForegroundWindow(self.hwnd);
         }
+    }
+
+    /// Puts the card beside a selection at `point` (screen pixels) and shows it without
+    /// taking the focus, so typing and selecting go on where they were. A pinned card stays.
+    fn show_near(&mut self, point: (i32, i32)) {
+        self.rebuild();
+        if !self.pinned {
+            unsafe {
+                let monitor = MonitorFromPoint(
+                    POINT {
+                        x: point.0,
+                        y: point.1,
+                    },
+                    MONITOR_DEFAULTTONEAREST,
+                );
+                let mut info = MONITORINFO {
+                    cbSize: size_of::<MONITORINFO>() as u32,
+                    ..Default::default()
+                };
+                if GetMonitorInfoW(monitor, &mut info).as_bool() {
+                    let (mut dpi, mut unused) = (96, 96);
+                    let _ = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &mut dpi, &mut unused);
+                    let scale = dpi as f32 / 96.0;
+                    // Room for the card at its tallest, so a long entry fits where it lands.
+                    let (width, height) = (
+                        (WIDTH * scale).ceil() as i32,
+                        (render::MAX_CARD * scale).ceil() as i32,
+                    );
+                    let work = info.rcWork;
+                    let (x, y) = capture::place(
+                        point.0,
+                        point.1,
+                        width,
+                        height,
+                        (work.left, work.top, work.right, work.bottom),
+                    );
+                    let _ = SetWindowPos(
+                        self.hwnd,
+                        None,
+                        x,
+                        y,
+                        0,
+                        0,
+                        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                    );
+                    self.rise = (y < point.1).then_some(y + height);
+                }
+            }
+        }
+        self.fit();
+        unsafe {
+            let _ = ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+        }
+    }
+
+    /// Hides without telling the capture thread; `hide` also retires captures in flight.
+    fn put_away(&mut self) {
+        if self.page.is_some() {
+            self.close_settings();
+        }
+        self.stop_sound();
+        self.mouse = None;
+        self.rise = None;
+        self.target = None;
+        self.frame = Frame::default();
+        unsafe {
+            let _ = ShowWindow(self.hwnd, SW_HIDE);
+            let _ = SetProcessWorkingSetSize(GetCurrentProcess(), usize::MAX, usize::MAX);
+        }
+    }
+}
+
+/// What the capture thread asks of the card, run on the window's thread.
+impl Card for App {
+    /// As 0.2.0: an unpinned card makes way for the new capture. The capture itself is not
+    /// retired, so this must not touch the epoch.
+    fn capture_started(&mut self, _manual: bool) {
+        if !self.pinned && unsafe { IsWindowVisible(self.hwnd) }.as_bool() {
+            self.put_away();
+        }
+    }
+
+    fn captured(&mut self, word: &str, point: (i32, i32), _manual: bool) {
+        if self.page.is_some() {
+            self.close_settings();
+        }
+        self.query = word.to_owned();
+        self.submit(false);
+        self.show_near(point);
+    }
+
+    fn capture_failed(&mut self, code: &str, point: (i32, i32), manual: bool) {
+        if self.page.is_some() {
+            self.close_settings();
+        }
+        self.query.clear();
+        // The shortcut with nothing selected opens the card for typing, like the tray does.
+        if manual && code == "no_selection" {
+            self.content = Content::Empty;
+            self.show();
+            return;
+        }
+        self.show_failure(FailureView::capture(code));
+        self.show_near(point);
+    }
+
+    fn dismiss(&mut self) {
+        self.pinned = false;
+        if unsafe { IsWindowVisible(self.hwnd) }.as_bool() {
+            self.put_away();
+        }
+    }
+
+    fn capture_unavailable(&mut self) {
+        self.capture_down = true;
     }
 }
 
@@ -1084,6 +1242,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_ERASEBKGND => LRESULT(1),
+            // Dragged by its search bar: it stays where it is put.
+            WM_ENTERSIZEMOVE => {
+                with_app(|app| app.rise = None);
+                LRESULT(0)
+            }
             WM_NCHITTEST => {
                 let mut point = POINT {
                     x: (lparam.0 & 0xffff) as i16 as i32,
@@ -1173,6 +1336,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     app.hover = None;
                 });
                 invalidate(hwnd);
+                LRESULT(0)
+            }
+            WM_TIMER if wparam.0 == HOTKEY_CHECK_TIMER => {
+                let _ = KillTimer(Some(hwnd), HOTKEY_CHECK_TIMER);
+                with_app(|app| {
+                    tray::update(app.hwnd, app.tray_status());
+                    app.report_blocked_hotkey();
+                });
                 LRESULT(0)
             }
             WM_TIMER if wparam.0 == LIFT_TIMER => {
@@ -1278,8 +1449,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 LRESULT(0)
             }
-            WM_HOTKEY if wparam.0 as i32 == SHOW_HOTKEY => {
-                with_app(|app| app.show());
+            WM_CAPTURE => {
+                let jobs = std::mem::take(&mut *JOBS.lock().unwrap());
+                for job in jobs {
+                    update_and_fit(|app| job(app));
+                }
                 LRESULT(0)
             }
             WM_SHOW => {
@@ -1306,7 +1480,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         let (mut enabled, mut hotkey) = (false, String::new());
                         with_app(|app| {
                             enabled = app.settings.enabled;
-                            if app.hotkey_active {
+                            if app.hotkey_active() {
                                 hotkey = app.settings.lookup_hotkey.clone();
                             }
                         });
@@ -1494,7 +1668,17 @@ pub fn run() -> Result<()> {
             .as_deref()
             .map(settings::load)
             .unwrap_or_default();
-        let hotkey_active = register_hotkey(hwnd, &preferences.lookup_hotkey);
+        // Development runs show saved data and must not answer selections next to the app.
+        let bridge = (!development).then(|| {
+            let status_file = settings_path
+                .as_deref()
+                .and_then(|path| path.parent())
+                .map(|folder| folder.join("capture-status.json"))
+                .unwrap_or_else(|| std::env::temp_dir().join("wordside-capture-status.json"));
+            let bridge = bridge_for(hwnd, &preferences, status_file);
+            capture::start(bridge.clone(), preferences.lookup_hotkey.clone());
+            bridge
+        });
         TASKBAR_CREATED.store(tray::taskbar_created(), Ordering::Relaxed);
         if let Instance::First(event) = launch {
             wait_for_launches(event, hwnd);
@@ -1537,14 +1721,17 @@ pub fn run() -> Result<()> {
             settings: preferences,
             settings_path,
             page: None,
-            hotkey_active,
+            bridge,
+            capture_down: false,
+            rise: None,
             report_paint: flag("--first-paint").then_some(start),
         };
         app.refresh_theme();
         APP.with(|cell| *cell.borrow_mut() = Some(app));
         with_app(|app| {
             tray::add(app.hwnd, app.tray_status());
-            app.report_blocked_hotkey();
+            // The capture thread registers the shortcut; look a moment later.
+            let _ = SetTimer(Some(app.hwnd), HOTKEY_CHECK_TIMER, 1500, None);
         });
         // A normal start waits in the tray; the shortcut, the tray or another launch shows
         // the card. Development runs show their data right away.

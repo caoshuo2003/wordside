@@ -116,6 +116,28 @@ pub fn source_label(id: &str) -> String {
     }
 }
 
+/// What a failed capture tells the user, by the capture's stable code. 0.2.0 put its input
+/// below the notice; here the input row is the card's top, hence "上方".
+pub fn capture_notice(code: &str) -> Notice {
+    let (title, message) = match code {
+        "no_selection" => ("没有读到选中文字", "重新选中单词后再试，或在上方输入。"),
+        "unreported_selection" => ("这里暂时无法取词", "重新选中后再试，或在上方输入。"),
+        "unsupported" | "access_denied" => ("这里暂时无法取词", "可以在上方直接输入要查的词。"),
+        "protected" => ("此处无法取词", "为保护隐私，不读取受保护的内容。"),
+        "source_changed" => ("请重新选词", "回到原来的窗口，选中单词后再试。"),
+        "invalid_selection" => ("请选中英文单词", "选择一个单词或简短短语，也可以直接输入。"),
+        "copy_unavailable" => ("这里暂时无法取词", "重新选中后再试，或在上方直接输入。"),
+        "clipboard_unavailable" => (
+            "暂时无法保留剪贴板",
+            "当前内容保持不变，可以在上方直接输入。",
+        ),
+        "clipboard_restore_failed" => ("剪贴板恢复未完成", "请检查剪贴板内容；本次没有继续查询。"),
+        "timeout" => ("取词有些慢", "重新选词后再试，或在上方输入。"),
+        _ => ("暂时没有读到文字", "重新选词后再试，或在上方输入。"),
+    };
+    notice(title, message, NoticeAction::Correct)
+}
+
 /// Turns a shortcut failure into advice without showing the raw error.
 pub fn shortcut_notice(error: &str) -> &'static str {
     if error.contains("占用") {
@@ -294,6 +316,51 @@ mod tests {
             lang: lang.into(),
             pron: pron.into(),
             url: url.into(),
+        }
+    }
+
+    // Ported from 0.2.0's capture notice test.
+    #[test]
+    fn capture_failures_read_as_short_advice_without_internals() {
+        for code in [
+            "no_selection",
+            "unreported_selection",
+            "unsupported",
+            "protected",
+            "source_changed",
+            "invalid_selection",
+            "access_denied",
+            "read_error",
+            "copy_unavailable",
+            "clipboard_unavailable",
+            "clipboard_restore_failed",
+            "timeout",
+            "unknown",
+            "__proto__",
+            "constructor",
+        ] {
+            let value = capture_notice(code);
+            assert!(value.message.chars().count() < 40, "{code}");
+            for internal in ["API", "接口", "进程", "权限", "GetSelection"] {
+                assert!(
+                    !value.title.contains(internal) && !value.message.contains(internal),
+                    "{code}"
+                );
+            }
+        }
+        assert_ne!(
+            capture_notice("protected").message,
+            capture_notice("no_selection").message
+        );
+        // Every code the capture layer reports has its own notice, not the fallback.
+        use crate::capture::selection::Selection;
+        for failure in [
+            Selection::NoSelection,
+            Selection::Protected,
+            Selection::Timeout,
+        ] {
+            let (code, _) = failure.failure().unwrap();
+            assert_ne!(capture_notice(code), capture_notice("read_error"), "{code}");
         }
     }
 

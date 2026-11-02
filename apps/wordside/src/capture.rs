@@ -1,4 +1,24 @@
-use tauri::AppHandle;
+//! Reading the selection: automatic lookup on select, the lookup shortcut, and the guarded
+//! clipboard fallback. Brought over from 0.2.0 with its decision rules and timings
+//! unchanged; only the link to the window is new (`Bridge` and `Card` below).
+// 0.2.0 never ran clippy. These lints only ask to rewrite the decision code, which stays as
+// it was proven in use; anything that is not a rewrite of that code was fixed instead.
+#![allow(
+    clippy::precedence,
+    clippy::too_many_arguments,
+    clippy::if_same_then_else,
+    clippy::manual_range_patterns,
+    clippy::question_mark,
+    clippy::enum_variant_names,
+    clippy::chunks_exact_to_as_chunks
+)]
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicIsize, AtomicU64},
+        Arc,
+    },
+};
 mod compatibility;
 mod copy_policy;
 #[cfg(windows)]
@@ -15,30 +35,49 @@ pub mod shortcut;
 mod timing;
 #[cfg(windows)]
 mod windows_copy;
-pub use policy::selected_word;
+#[cfg(test)]
+use policy::selected_word;
 #[cfg(windows)]
 mod windows;
 #[cfg(windows)]
 mod windows_edit;
 #[cfg(windows)]
 pub(crate) mod windows_text;
-pub fn hide(window: &tauri::WebviewWindow) {
-    #[cfg(windows)]
-    {
-        #[link(name = "user32")]
-        extern "system" {
-            fn ShowWindow(window: isize, command: i32) -> i32;
-        }
-        if let Ok(hwnd) = window.hwnd() {
-            unsafe {
-                ShowWindow(hwnd.0 as isize, 0);
-            }
-        }
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = window.hide();
-    }
+
+/// What the window shows for a capture. Called on the window's thread.
+pub trait Card {
+    /// A capture started: put away what the card showed, unless it is pinned.
+    fn capture_started(&mut self, manual: bool);
+    /// Show the card for a captured word near `point` (screen pixels), without taking the
+    /// focus from the window the word came from.
+    fn captured(&mut self, word: &str, point: (i32, i32), manual: bool);
+    /// The capture found nothing usable; `code` picks the notice.
+    fn capture_failed(&mut self, code: &str, point: (i32, i32), manual: bool);
+    /// Clicked elsewhere, or the source went away.
+    fn dismiss(&mut self);
+    /// The input hooks could not be installed; manual lookup still works.
+    fn capture_unavailable(&mut self);
+}
+
+/// A job for the window's thread.
+pub type Job = Box<dyn FnOnce(&mut dyn Card) + Send>;
+
+/// State the capture thread and the window share, and the way to reach the window.
+pub struct Bridge {
+    /// Automatic lookup on select.
+    pub enabled: AtomicBool,
+    pub pinned: AtomicBool,
+    /// Moves on whenever what the card shows no longer belongs to a capture in flight:
+    /// the switch changed, the shortcut changed, the card was dismissed.
+    pub capture_epoch: AtomicU64,
+    pub capture_serial: AtomicU64,
+    /// The card's window handle, published once it exists.
+    pub card: AtomicIsize,
+    pub hotkeys: Arc<hotkey::Control>,
+    /// `capture-status.json`, beside the settings.
+    pub status_file: PathBuf,
+    /// Runs a job on the window's thread.
+    pub post: Box<dyn Fn(Job) + Send + Sync>,
 }
 
 fn poll_interval(enabled: bool, popup_visible: bool) -> u64 {
@@ -58,11 +97,9 @@ pub fn place(x: i32, y: i32, width: i32, height: i32, work: (i32, i32, i32, i32)
     };
     (px, py.min(b - height - 8).max(t + 8))
 }
-#[cfg(not(windows))]
-pub fn start(_app: AppHandle) {}
-#[cfg(windows)]
-pub fn start(app: AppHandle) {
-    std::thread::spawn(move || windows::run(app));
+/// Starts capturing on its own thread, with `hotkey` as written in the settings.
+pub fn start(bridge: Arc<Bridge>, hotkey: String) {
+    std::thread::spawn(move || windows::run(bridge, hotkey));
 }
 
 #[cfg(test)]
