@@ -85,9 +85,9 @@ pub const DARK: Theme = Theme {
     warn: 0xffc48a,
     row: Rgba(0xffffff, 0.11),
     line: Rgba(0xffffff, 0.14),
-    raised: Rgba(0xffffff, 0.10),
-    edge: Rgba(0xffffff, 0.18),
-    shadow: Rgba(0x000000, 0.16),
+    raised: Rgba(0xffffff, 0.13),
+    edge: Rgba(0xffffff, 0.34),
+    shadow: Rgba(0x000000, 0.07),
 };
 pub const LIGHT: Theme = Theme {
     fill: 0xfafbfc,
@@ -99,9 +99,9 @@ pub const LIGHT: Theme = Theme {
     warn: 0x8a3d00,
     row: Rgba(0x000000, 0.07),
     line: Rgba(0x000000, 0.11),
-    raised: Rgba(0xffffff, 0.72),
-    edge: Rgba(0xffffff, 0.95),
-    shadow: Rgba(0x14233c, 0.05),
+    raised: Rgba(0xffffff, 0.86),
+    edge: Rgba(0xffffff, 1.0),
+    shadow: Rgba(0x14233c, 0.022),
 };
 
 #[derive(Clone, Copy)]
@@ -1229,10 +1229,13 @@ pub fn paint(p: Paint) -> Result<()> {
                         &row,
                     );
                 } else {
-                    // A row under the mouse floats up: a soft shadow stepping out below,
-                    // then a lighter glass tile with a thin highlight edge.
+                    // A row under the mouse floats up: lifted a pixel over a wide, soft
+                    // shadow, a brighter glass tile, and a rim of light strongest at the top.
                     let radius = 10.0;
-                    for (grow, drop) in [(2.5, 4.0), (1.0, 2.0), (0.0, 1.0)] {
+                    let r = moved(r, 0.0, -1.0);
+                    for step in 0..7 {
+                        let grow = step as f32 * 1.4;
+                        let drop = 2.0 + step as f32 * 1.1;
                         target.FillRoundedRectangle(
                             &D2D1_ROUNDED_RECT {
                                 rect: rect(
@@ -1253,7 +1256,40 @@ pub fn paint(p: Paint) -> Result<()> {
                         radiusY: radius,
                     };
                     target.FillRoundedRectangle(&tile, &raised);
-                    // Half a pixel in, so the edge stays sharp.
+                    let stops = [
+                        D2D1_GRADIENT_STOP {
+                            position: 0.0,
+                            color: color(theme.edge.0, theme.edge.1),
+                        },
+                        D2D1_GRADIENT_STOP {
+                            position: 0.6,
+                            color: color(theme.edge.0, theme.edge.1 * 0.35),
+                        },
+                        D2D1_GRADIENT_STOP {
+                            position: 1.0,
+                            color: color(theme.edge.0, theme.edge.1 * 0.2),
+                        },
+                    ];
+                    let rim = target
+                        .CreateGradientStopCollection(
+                            &stops,
+                            D2D1_GAMMA_2_2,
+                            D2D1_EXTEND_MODE_CLAMP,
+                        )
+                        .and_then(|collection| {
+                            target.CreateLinearGradientBrush(
+                                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                                    startPoint: Vector2 { X: 0.0, Y: r.top },
+                                    endPoint: Vector2 {
+                                        X: 0.0,
+                                        Y: r.bottom,
+                                    },
+                                },
+                                None,
+                                &collection,
+                            )
+                        });
+                    // Half a pixel in, so the rim stays sharp.
                     let inner = D2D1_ROUNDED_RECT {
                         rect: rect(
                             r.left + 0.5,
@@ -1263,7 +1299,10 @@ pub fn paint(p: Paint) -> Result<()> {
                         ),
                         ..tile
                     };
-                    target.DrawRoundedRectangle(&inner, &edge, 1.0, None);
+                    match &rim {
+                        Ok(rim) => target.DrawRoundedRectangle(&inner, rim, 1.0, None),
+                        Err(_) => target.DrawRoundedRectangle(&inner, &edge, 1.0, None),
+                    }
                 }
             }
             for shape in frame.shapes.iter().filter(|s| s.zone == zone) {
