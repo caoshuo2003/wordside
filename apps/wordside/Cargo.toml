@@ -1,0 +1,66 @@
+[package]
+name = "wordside"
+version = "0.3.0"
+edition = "2021"
+description = "A small, quiet selection dictionary for Windows"
+
+[workspace]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "system-proxy"] }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "sync", "net", "io-util"] }
+dom_query = { version = "=0.28.0", default-features = false }
+regex = "1"
+windows-numerics = "0.3"
+# Named directly because the `implement` macro (pronunciation callback) expands to it.
+windows-core = "0.62"
+
+[dev-dependencies]
+# Capture tests write their probe and status files into temporary folders.
+tempfile = "3"
+
+[dependencies.windows]
+version = "0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Direct2D",
+    "Win32_Graphics_Direct2D_Common",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
+    "Win32_System_DataExchange",
+    "Win32_Media_MediaFoundation",
+    "Win32_Security",
+    "Win32_System_Com",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[lints.clippy]
+dbg_macro = "warn"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,32 @@
+{
+  "entry": {
+    "word": "record",
+    "pos": ["noun", "verb"],
+    "pronunciation": [
+      { "pos": "noun", "lang": "uk", "pron": "/ˈrek.ɔːd/", "url": "https://dictionary.cambridge.org/media/sample-noun-uk.mp3" },
+      { "pos": "noun", "lang": "us", "pron": "/ˈrek.ɚd/", "url": "https://dictionary.cambridge.org/media/sample-noun-us.mp3" },
+      { "pos": "verb", "lang": "uk", "pron": "/rɪˈkɔːd/", "url": "https://dictionary.cambridge.org/media/sample-verb-uk.mp3" },
+      { "pos": "verb", "lang": "us", "pron": "/rɪˈkɔːrd/", "url": "https://dictionary.cambridge.org/media/sample-verb-us.mp3" }
+    ],
+    "definition": [
+      { "pos": "noun [ C ]", "source": "", "text": "written information kept so that it can be looked at later", "translation": "记录，记载", "example": [
+        { "text": "Keep a record of everything you spend.", "translation": "把你的每一笔开支都记下来。" },
+        { "text": "The doctor checked her medical records.", "translation": "医生查看了她的病历。" }
+      ] },
+      { "pos": "noun [ C ]", "source": "cald4", "text": "the best result ever achieved in an activity", "translation": "最高纪录", "example": [
+        { "text": "She broke the world record.", "translation": "她打破了世界纪录。" }
+      ] },
+      { "pos": "noun [ C ]", "source": "", "text": "a flat disc on which music has been stored", "translation": "唱片", "example": [] },
+      { "pos": "noun [ C ]", "source": "cbed", "text": "the facts known about somebody's past behaviour or performance at work", "translation": "", "example": [
+        { "text": "The company has a good safety record.", "translation": "" }
+      ] },
+      { "pos": "noun [ C ]", "source": "", "text": "a piece of information in a database, stored as a single unit", "translation": "（数据库的）一条记录", "example": [] },
+      { "pos": "verb [ T ]", "source": "", "text": "to store sounds or pictures so that they can be played again", "translation": "录音，录像", "example": [
+        { "text": "The band recorded a new album last year.", "translation": "这支乐队去年录制了一张新专辑。" }
+      ] },
+      { "pos": "verb [ T ]", "source": "", "text": "to write down information so that it can be used later", "translation": "记录，记下", "example": [
+        { "text": "All sales are recorded in the system.", "translation": "所有销售都记录在系统里。" }
+      ] }
+    ]
+  }
+}

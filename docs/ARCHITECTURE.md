@@ -1,5 +1,40 @@
 # 架构与边界
 
+现在有两套代码：发布中的 0.2.0（`desktop/`，Tauri + TypeScript）和正在做的 0.3.0 原生卡片（`apps/wordside/`，纯 Rust）。0.3.0 切换发布后删除 `desktop/` 和本文后半部分的 0.2.0 说明。计划见[产品开发文档](PRODUCT-DEVELOPMENT.md)。
+
+## 0.3.0 原生卡片（apps/wordside）
+
+```mermaid
+flowchart LR
+    T[托盘 / 快捷键 / 再次启动] --> A[app.rs 消息循环]
+    I[卡片里输入] --> A
+    A --> S[service.rs 缓存与门控]
+    S --> D[dictionary/ 读取单词 API]
+    D --> G[Cambridge 网页]
+    S --> E[entry.rs 词条校验]
+    E --> C[card.rs 卡片状态]
+    C --> R[render.rs 排版与绘制]
+```
+
+一个进程、一个窗口，没有 WebView。启动只在托盘待命；隐藏卡片时释放绘制资源并裁剪工作集；tokio 运行时在第一次查词时才创建。
+
+| 文件 | 责任 |
+|---|---|
+| `main.rs`、`cli.rs` | 入口；`--wordside-dictionary-probe/-parse/-licenses` 不开窗口，名称和输出与 0.2.0 相同 |
+| `app.rs` | 窗口和消息循环、单实例（命名事件）、快捷键注册、玻璃效果、悬停和键盘的弹起动画、设置页和右键菜单的动作 |
+| `card.rs` | 卡片里显示什么、按键怎么走：词性分组和读音、选中与展开、发音状态、设置页的行和录制快捷键。不调用 Windows，测试直接覆盖 |
+| `render.rs` | DirectWrite 排版、命中测试、Direct2D 绘制；限高、滚动和底部渐隐 |
+| `settings.rs` | 读写 `%APPDATA%\local.wordside.dictionary.api-preview\settings.json`；每个字段单独读取，不认识的字段原样写回；先写临时文件再替换 |
+| `tray.rs`、`menu.rs`、`icon.rs` | 托盘图标和菜单、系统弹出菜单、代码绘制的图标（托盘现画，软件图标导出为 `assets/wordside.ico`） |
+| `audio.rs` | 只从 Cambridge 下载发音到内存，用 Media Foundation 媒体引擎播放，不写磁盘 |
+| `service.rs`、`lookup.rs`、`cache.rs` | 查询编排：按词门控、内存缓存、英汉缺词回退英英、取消 |
+| `entry.rs`、`presentation.rs` | 词条校验（移植自 `shared/dictionary.ts`）、提示文案（移植自 `presentation.ts`） |
+| `dictionary/` | 读取单词 API，从 `desktop/` 原样搬来 |
+| `shortcut.rs`、`selection_input.rs` | 快捷键文本解析、输入清理，从 0.2.0 原样复制 |
+| `build.rs` | 把第三方许可清单和图标编进 exe |
+
+## 0.2.0（desktop）
+
 ```mermaid
 flowchart LR
     A[Windows 选区 / 快捷键] --> B[源窗口校验与后台取词]

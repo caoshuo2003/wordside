@@ -1,0 +1,29 @@
+// The exe's icon, shown by Explorer, shortcuts and the taskbar. Regenerate wordside.ico with
+// `wordside.exe --export-icon assets\wordside.ico` after changing the drawing in src/icon.rs.
+1 ICON "wordside.ico"
+
+// File properties. build.rs passes the numbers from Cargo.toml.
+1 VERSIONINFO
+FILEVERSION WS_MAJOR, WS_MINOR, WS_PATCH, 0
+PRODUCTVERSION WS_MAJOR, WS_MINOR, WS_PATCH, 0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "080404b0"
+    BEGIN
+      VALUE "CompanyName", "WordSide"
+      VALUE "FileDescription", "WordSide"
+      VALUE "FileVersion", WS_VERSION
+      VALUE "InternalName", "wordside"
+      VALUE "OriginalFilename", "wordside.exe"
+      VALUE "ProductName", "WordSide"
+      VALUE "ProductVersion", WS_VERSION
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0804, 1200
+  END
+END
