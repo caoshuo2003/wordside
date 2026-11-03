@@ -9,7 +9,15 @@ use windows::Win32::System::Console::{
     AttachConsole, GetStdHandle, ATTACH_PARENT_PROCESS, STD_OUTPUT_HANDLE,
 };
 
-pub const LICENSES: &str = include_str!(concat!(env!("OUT_DIR"), "/THIRD-PARTY-LICENSES.txt"));
+const LICENSES: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/THIRD-PARTY-LICENSES.deflate"));
+
+/// The third-party notices, inflated when someone asks for them.
+pub fn licenses() -> String {
+    miniz_oxide::inflate::decompress_to_vec(LICENSES)
+        .ok()
+        .and_then(|text| String::from_utf8(text).ok())
+        .unwrap_or_default()
+}
 /// Saved pages are read up to the same limit the network reader enforces.
 const PAGE_LIMIT: u64 = 4 * 1024 * 1024;
 
@@ -23,7 +31,7 @@ pub fn run() -> bool {
     match flag.as_str() {
         "--wordside-dictionary-licenses" => {
             attach_console();
-            print!("{LICENSES}");
+            print!("{}", licenses());
         }
         "--wordside-dictionary-parse" => {
             attach_console();
@@ -143,6 +151,7 @@ mod tests {
     #[test]
     fn the_notices_keep_the_parser_authors_credit() {
         // The real list comes from tools/build-licenses.mjs; a placeholder otherwise says how.
-        assert!(LICENSES.contains("WordSide") || LICENSES.contains("build-licenses"));
+        let notices = licenses();
+        assert!(notices.contains("WordSide") || notices.contains("build-licenses"));
     }
 }

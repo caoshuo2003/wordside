@@ -2,7 +2,7 @@
 use crate::card::{Content, Coverage, SettingsChange, SettingsView, Sound, THEMES};
 use crate::presentation::{source_label, PronunciationChip};
 use crate::settings::Settings;
-use std::sync::OnceLock;
+use std::{mem::ManuallyDrop, sync::OnceLock};
 use windows::{
     core::{w, Result, BOOL, PCWSTR},
     Win32::Graphics::{
@@ -23,6 +23,8 @@ pub const MAX_CARD: f32 = 420.0;
 /// A tall header (many pronunciations) still leaves this much list in view.
 const MIN_BODY: f32 = 120.0;
 const FADE_H: f32 = 36.0;
+/// Tabs fade out over this width at an edge with more of them past it.
+const TAB_FADE: f32 = 28.0;
 const GLASS_OPACITY: f32 = 0.55;
 const ICON_FONT: PCWSTR = w!("Segoe MDL2 Assets");
 /// Stands for Segoe UI Variable Text where Windows 11 has it, else Segoe UI. Chinese falls
@@ -125,8 +127,30 @@ enum Fill {
 #[derive(Clone, Copy, PartialEq)]
 enum Zone {
     Head,
+    /// A one-line strip in the head, drawn clipped to its row so it can scroll sideways.
+    /// Its hits stay in `Head`.
+    Strip(Strip),
     Body,
     Foot,
+}
+
+/// The head's rows that scroll sideways when they don't fit.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Strip {
+    /// The readings, on their own line under a word too long to have them beside it.
+    Readings,
+    /// The part-of-speech tabs.
+    Tabs,
+}
+
+/// A strip: where it shows, how far it can scroll, and each item's left and right edge
+/// before scrolling, to bring the selected tab into view.
+pub struct Row {
+    strip: Strip,
+    rect: D2D_RECT_F,
+    scroll: f32,
+    max_scroll: f32,
+    spans: Vec<(f32, f32)>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,6 +184,21 @@ struct Piece {
     y: f32,
     ink: Ink,
     zone: Zone,
+    /// Has Chinese in it, which renders without snapping to the pixel grid.
+    han: bool,
+}
+
+/// Glass text's rendering for Latin lines and for lines with Chinese in them.
+pub struct TextParams {
+    pub latin: IDWriteRenderingParams,
+    pub han: IDWriteRenderingParams,
+}
+
+/// CJK ideographs, their punctuation and fullwidth forms.
+fn has_han(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c, '\u{2e80}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{ff00}'..='\u{ffef}')
+    })
 }
 
 struct Shape {
@@ -186,6 +225,7 @@ pub struct Frame {
     selected: Option<(f32, f32)>,
     /// Where the input caret goes; None on pages without the input.
     caret_x: Option<f32>,
+    rows: Vec<Row>,
 }
 
 impl Frame {
@@ -205,6 +245,47 @@ impl Frame {
     }
     pub fn max_scroll(&self) -> f32 {
         (self.body_h - self.visible_body()).max(0.0)
+    }
+    fn row(&self, strip: Strip) -> Option<&Row> {
+        self.rows.iter().find(|row| row.strip == strip)
+    }
+    /// How far a strip can scroll; 0 when it all fits.
+    pub fn max_strip_scroll(&self, strip: Strip) -> f32 {
+        self.row(strip).map_or(0.0, |row| row.max_scroll)
+    }
+    /// The strip under the point, if it doesn't all fit: dragging or the wheel scrolls it.
+    pub fn scrolling_strip_at(&self, x: f32, y: f32) -> Option<Strip> {
+        self.rows
+            .iter()
+            .find(|row| {
+                row.max_scroll > 0.0
+                    && x >= row.rect.left
+                    && x < row.rect.right
+                    && y >= row.rect.top
+                    && y < row.rect.bottom
+            })
+            .map(|row| row.strip)
+    }
+    /// The tab scroll that shows the whole of tab `index`, its neighbours' fade aside.
+    pub fn reveal_tab(&self, index: usize, scroll: f32) -> f32 {
+        let Some(row) = self.row(Strip::Tabs) else {
+            return scroll;
+        };
+        let Some(&(left, right)) = row.spans.get(index) else {
+            return scroll;
+        };
+        let margin = TAB_FADE;
+        let scroll = if right - scroll > row.rect.right - margin {
+            right - (row.rect.right - margin)
+        } else {
+            scroll
+        };
+        let scroll = if left - scroll < row.rect.left + margin {
+            left - (row.rect.left + margin)
+        } else {
+            scroll
+        };
+        scroll.clamp(0.0, row.max_scroll)
     }
     /// The scroll position that keeps the selected row on screen.
     pub fn scroll_to_selected(&self, scroll: f32) -> f32 {
@@ -337,6 +418,7 @@ impl Builder<'_> {
             y,
             ink,
             zone,
+            han: has_han(text),
         });
         Ok(size)
     }
@@ -436,6 +518,67 @@ impl Builder<'_> {
             self.hit(Zone::Head, rect(x, y, width, 28.0), Action::Sound(index));
         }
         Ok(width)
+    }
+
+    /// Where the pieces, shapes and hits laid out next begin, for `strip`.
+    fn mark(&self) -> (usize, usize, usize) {
+        (
+            self.frame.pieces.len(),
+            self.frame.shapes.len(),
+            self.frame.hits.len(),
+        )
+    }
+
+    /// Makes what was laid out since `from` a strip that shows inside `rect` and scrolls
+    /// sideways, by `wanted` as far as it goes. Hits are cut to the part that shows.
+    fn strip(
+        &mut self,
+        strip: Strip,
+        from: (usize, usize, usize),
+        rect: D2D_RECT_F,
+        spans: Vec<(f32, f32)>,
+        wanted: f32,
+    ) {
+        let end = spans.last().map_or(rect.left, |&(_, right)| right);
+        let max_scroll = (end - (rect.right - 8.0)).max(0.0);
+        let scroll = wanted.clamp(0.0, max_scroll);
+        for piece in &mut self.frame.pieces[from.0..] {
+            piece.x -= scroll;
+            piece.zone = Zone::Strip(strip);
+        }
+        for shape in &mut self.frame.shapes[from.1..] {
+            shape.rect = moved(shape.rect, -scroll, 0.0);
+            shape.zone = Zone::Strip(strip);
+        }
+        for mut hit in self.frame.hits.split_off(from.2) {
+            hit.rect = moved(hit.rect, -scroll, 0.0);
+            hit.rect.left = hit.rect.left.max(rect.left);
+            hit.rect.right = hit.rect.right.min(rect.right);
+            if hit.rect.right > hit.rect.left {
+                self.frame.hits.push(hit);
+            }
+        }
+        self.frame.rows.push(Row {
+            strip,
+            rect,
+            scroll,
+            max_scroll,
+            spans,
+        });
+    }
+
+    /// Moves what was laid out since `from` by `dx`, `dy`.
+    fn shift(&mut self, from: (usize, usize, usize), dx: f32, dy: f32) {
+        for piece in &mut self.frame.pieces[from.0..] {
+            piece.x += dx;
+            piece.y += dy;
+        }
+        for shape in &mut self.frame.shapes[from.1..] {
+            shape.rect = moved(shape.rect, dx, dy);
+        }
+        for hit in &mut self.frame.hits[from.2..] {
+            hit.rect = moved(hit.rect, dx, dy);
+        }
     }
 
     fn shape(&mut self, zone: Zone, rect: D2D_RECT_F, radius: f32, fill: Fill) {
@@ -868,28 +1011,31 @@ pub fn build(
                 width,
                 style(26.0, true, Ink::Strong),
             )?;
-            let mut x = PAD + word_w + 4.0;
-            let mut line_top = head + (word_h - 28.0) / 2.0 + 2.0;
+            // The readings go beside the word when they all fit there; otherwise all of them
+            // go on one line of their own under it, which scrolls sideways if need be.
+            let first_x = PAD + word_w + 4.0;
+            let line_top = head + (word_h - 28.0) / 2.0 + 2.0;
             let mut bottom = head + word_h;
+            let from = b.mark();
+            let mut spans = Vec::new();
+            let mut x = first_x;
             for index in view.tab_chips() {
-                let pieces = b.frame.pieces.len();
-                let hits = b.frame.hits.len();
                 let w = b.reading(x, line_top, &view.chips[index], view.sounds[index], index)?;
-                if x > PAD && x + w > WIDTH - PAD + 6.0 {
-                    // Too wide for what is left: start a new line under the word.
-                    let (dx, dy) = (PAD - 6.0 - x, bottom.max(line_top + 28.0) + 2.0 - line_top);
-                    for piece in &mut b.frame.pieces[pieces..] {
-                        piece.x += dx;
-                        piece.y += dy;
-                    }
-                    for hit in &mut b.frame.hits[hits..] {
-                        hit.rect = moved(hit.rect, dx, dy);
-                    }
-                    line_top += dy;
-                    x = PAD - 6.0;
-                }
+                spans.push((x, x + w));
                 x += w + 2.0;
-                bottom = bottom.max(line_top + 28.0);
+            }
+            if let Some(&(_, end)) = spans.last() {
+                if end <= WIDTH - PAD + 6.0 {
+                    bottom = bottom.max(line_top + 28.0);
+                } else {
+                    let top = bottom + 2.0;
+                    let dx = PAD - 6.0 - first_x;
+                    b.shift(from, dx, top - line_top);
+                    let spans = spans.iter().map(|&(l, r)| (l + dx, r + dx)).collect();
+                    let row = rect(PAD - 8.0, top, WIDTH - PAD * 2.0 + 16.0, 28.0);
+                    b.strip(Strip::Readings, from, row, spans, view.reading_scroll);
+                    bottom = top + 28.0;
+                }
             }
             head = bottom + 2.0;
             let notes = [
@@ -913,6 +1059,8 @@ pub fn build(
             }
             if view.groups.len() > 1 {
                 head += 2.0;
+                let from = b.mark();
+                let mut spans = Vec::new();
                 let mut x = PAD;
                 for (index, group) in view.groups.iter().enumerate() {
                     let current = index == view.tab;
@@ -950,8 +1098,12 @@ pub fn build(
                         rect(x - 4.0, head, tab_w + 8.0, 30.0),
                         Action::Tab(index),
                     );
+                    spans.push((x, x + tab_w));
                     x += tab_w + 20.0;
                 }
+                // More tabs than fit (`in` has seven) scroll sideways inside their row.
+                let row = rect(PAD - 8.0, head, WIDTH - PAD * 2.0 + 16.0, 30.0);
+                b.strip(Strip::Tabs, from, row, spans, view.tab_scroll);
                 head += 30.0;
             } else {
                 head += 8.0;
@@ -1170,6 +1322,8 @@ pub struct Paint<'a> {
     pub target: &'a ID2D1HwndRenderTarget,
     pub theme: &'a Theme,
     pub glass: bool,
+    /// Glass text's rendering; None leaves the target's own (ClearType on an opaque card).
+    pub text: Option<&'a TextParams>,
     pub frame: &'a Frame,
     pub scroll: f32,
     /// The mouse position in the card, while it is over the card.
@@ -1194,12 +1348,19 @@ pub fn paint(p: Paint) -> Result<()> {
         target,
         theme,
         glass,
+        text,
         frame,
         scroll,
         mouse,
         lift,
         keyboard,
     } = p;
+    // Text lands on whole pixels, so whatever moves with it does too: a row's tile and
+    // its text rise together instead of the text stepping behind the tile.
+    let mut dpi = (96.0, 96.0);
+    unsafe { target.GetDpi(&mut dpi.0, &mut dpi.1) };
+    let px = dpi.1 / 96.0;
+    let snap = |y: f32| (y * px).round() / px;
     let hovered = if keyboard {
         frame
             .selected
@@ -1208,13 +1369,14 @@ pub fn paint(p: Paint) -> Result<()> {
         mouse.and_then(|(x, y)| frame.hovered(x, y, scroll))
     };
     let rise = pop(lift);
+    let lifted = snap(-LIFT_PX * rise);
     let lifted_row = hovered
         .filter(|(zone, _)| *zone == Zone::Body)
         .map(|(_, r)| r);
     // Whatever belongs to the hovered row (text, bar, tag) rises with its tile.
     let raised_by = |zone: Zone, y: f32| {
         if zone == Zone::Body && lifted_row.is_some_and(|r| y >= r.top && y < r.bottom) {
-            -LIFT_PX * rise
+            lifted
         } else {
             0.0
         }
@@ -1280,7 +1442,7 @@ pub fn paint(p: Paint) -> Result<()> {
                     // A row under the mouse floats up: lifted a pixel over a wide, soft
                     // shadow, a brighter glass tile, and a rim of light strongest at the top.
                     let radius = 10.0;
-                    let r = moved(r, 0.0, -LIFT_PX * rise);
+                    let r = moved(r, 0.0, lifted);
                     for step in 0..7 {
                         let grow = step as f32 * 1.4;
                         // The shadow falls further as the row rises.
@@ -1370,6 +1532,9 @@ pub fn paint(p: Paint) -> Result<()> {
                 if zone == Zone::Body && (y > foot_top || y < body_top - 2000.0) {
                     continue;
                 }
+                if let Some(text) = text {
+                    target.SetTextRenderingParams(if piece.han { &text.han } else { &text.latin });
+                }
                 target.DrawTextLayout(
                     Vector2 { X: piece.x, Y: y },
                     &piece.layout,
@@ -1385,6 +1550,57 @@ pub fn paint(p: Paint) -> Result<()> {
             D2D1_ANTIALIAS_MODE_ALIASED,
         );
         draw(Zone::Head, 0.0);
+        for row in &frame.rows {
+            // The edge with more past it fades out, so the row reads as one that scrolls.
+            // The fade is a mask on what is in it, not a colour over it: glass shows
+            // whatever is behind the card, and no colour would match it.
+            let fades = (row.scroll > 0.5, row.scroll < row.max_scroll - 0.5);
+            let edge = TAB_FADE / (row.rect.right - row.rect.left);
+            let alpha = |faded: bool| if faded { 0.0 } else { 1.0 };
+            let stops = [
+                (0.0, alpha(fades.0)),
+                (edge, 1.0),
+                (1.0 - edge, 1.0),
+                (1.0, alpha(fades.1)),
+            ]
+            .map(|(position, a)| D2D1_GRADIENT_STOP {
+                position,
+                color: color(0, a),
+            });
+            let collection = target.CreateGradientStopCollection(
+                &stops,
+                D2D1_GAMMA_2_2,
+                D2D1_EXTEND_MODE_CLAMP,
+            )?;
+            let mask = target.CreateLinearGradientBrush(
+                &D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES {
+                    startPoint: Vector2 {
+                        X: row.rect.left,
+                        Y: 0.0,
+                    },
+                    endPoint: Vector2 {
+                        X: row.rect.right,
+                        Y: 0.0,
+                    },
+                },
+                None,
+                &collection,
+            )?;
+            let layer = target.CreateLayer(None)?;
+            let params = D2D1_LAYER_PARAMETERS {
+                contentBounds: row.rect,
+                geometricMask: ManuallyDrop::new(None),
+                maskAntialiasMode: D2D1_ANTIALIAS_MODE_ALIASED,
+                maskTransform: Matrix3x2::identity(),
+                opacity: 1.0,
+                opacityBrush: ManuallyDrop::new(Some(mask.into())),
+                layerOptions: D2D1_LAYER_OPTIONS_NONE,
+            };
+            target.PushLayer(&params, &layer);
+            draw(Zone::Strip(row.strip), 0.0);
+            target.PopLayer();
+            drop(ManuallyDrop::into_inner(params.opacityBrush));
+        }
         if let Some(caret_x) = frame.caret_x {
             target.FillRectangle(&rect(caret_x, 15.0, 1.5, 22.0), &accent);
         }
@@ -1407,7 +1623,7 @@ pub fn paint(p: Paint) -> Result<()> {
                 &rect(0.0, body_top, WIDTH, body_h),
                 D2D1_ANTIALIAS_MODE_ALIASED,
             );
-            draw(Zone::Body, body_top - scroll);
+            draw(Zone::Body, snap(body_top - scroll));
             target.PopAxisAlignedClip();
             // More below: fade the last lines out; gone once the list reaches its end.
             if scroll < frame.max_scroll() - 1.0 {
@@ -1474,5 +1690,55 @@ pub fn paint(p: Paint) -> Result<()> {
             draw(Zone::Foot, foot_top);
         }
         target.EndDraw(None, None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_selected_tab_scrolls_fully_into_view_and_no_further() {
+        let frame = Frame {
+            rows: vec![
+                Row {
+                    strip: Strip::Readings,
+                    rect: rect(12.0, 40.0, 376.0, 28.0),
+                    scroll: 0.0,
+                    max_scroll: 0.0,
+                    spans: vec![(14.0, 200.0), (202.0, 380.0)],
+                },
+                Row {
+                    strip: Strip::Tabs,
+                    rect: rect(12.0, 0.0, 376.0, 30.0),
+                    scroll: 0.0,
+                    max_scroll: 200.0,
+                    spans: vec![(20.0, 80.0), (100.0, 160.0), (420.0, 480.0), (540.0, 580.0)],
+                },
+            ],
+            ..Frame::default()
+        };
+        // Already in view: stays.
+        assert_eq!(frame.reveal_tab(1, 0.0), 0.0);
+        // Off to the right: its right edge lands just inside the fade.
+        assert_eq!(frame.reveal_tab(2, 0.0), 480.0 - (388.0 - TAB_FADE));
+        // The last one can't scroll past the end.
+        assert_eq!(frame.reveal_tab(3, 0.0), 200.0);
+        // Back to the first: all the way left.
+        assert_eq!(frame.reveal_tab(0, 150.0), 0.0);
+        assert_eq!(frame.scrolling_strip_at(200.0, 10.0), Some(Strip::Tabs));
+        // Readings that fit don't scroll, so a drag there is just a click.
+        assert_eq!(frame.scrolling_strip_at(200.0, 50.0), None);
+        assert_eq!(frame.max_strip_scroll(Strip::Readings), 0.0);
+    }
+
+    #[test]
+    fn lines_with_chinese_render_apart_from_latin_ones() {
+        assert!(has_han("记录，记载"));
+        assert!(has_han("剑桥高阶英语 · 例句 1"));
+        assert!(has_han("（数据库的）"));
+        assert!(!has_han("the best result ever achieved"));
+        assert!(!has_han("/ˈrek.ɔːd/"));
+        assert!(!has_han("\u{E71A}"));
     }
 }

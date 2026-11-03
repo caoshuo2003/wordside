@@ -26,7 +26,7 @@ flowchart LR
 | `render.rs` | DirectWrite 排版、命中测试、Direct2D 绘制；限高、滚动和底部渐隐 |
 | `settings.rs` | 读写 `%APPDATA%\local.wordside.dictionary.api-preview\settings.json`；每个字段单独读取，不认识的字段原样写回；先写临时文件再替换 |
 | `tray.rs`、`menu.rs`、`icon.rs` | 托盘图标和菜单、系统弹出菜单、代码绘制的图标（托盘现画，软件图标导出为 `assets/wordside.ico`） |
-| `audio.rs` | 只从 Cambridge 下载发音到内存，用 Media Foundation 媒体引擎播放，不写磁盘 |
+| `audio.rs` | 只从 Cambridge 下载发音到内存，用 Media Foundation 解码、XAudio2 播放，不写磁盘；连续播放共用一条输出流，免得开头被吞 |
 | `service.rs`、`lookup.rs`、`cache.rs` | 查询编排：按词门控、内存缓存、英汉缺词回退英英、取消 |
 | `entry.rs`、`presentation.rs` | 词条校验（移植自 `shared/dictionary.ts`）、提示文案（移植自 `presentation.ts`） |
 | `dictionary/` | 读取单词 API，从 `desktop/` 原样搬来 |

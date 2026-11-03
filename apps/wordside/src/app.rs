@@ -1,6 +1,6 @@
 //! The window, the message loop and everything that reacts to input.
 use crate::{
-    audio::{self, Player},
+    audio::{self, Speaker},
     capture::{self, shortcut, Bridge, Card},
     card::{
         allowed_link, pressed_combo, sense_text, Content, EntryView, FailureView, SettingsChange,
@@ -10,8 +10,8 @@ use crate::{
     entry::{read_api_entry, Entry, LookupError},
     menu,
     presentation::shortcut_notice,
-    render::{self, Action, Frame, Theme, DARK, INPUT_H, LIGHT, WIDTH},
-    selection_input::selected_word,
+    render::{self, Action, Frame, Strip, TextParams, Theme, DARK, INPUT_H, LIGHT, WIDTH},
+    selection_input::{fallback_words, selected_word},
     service::Service,
     settings::{self, Settings},
     tray::{self, Command, WM_TRAY},
@@ -63,8 +63,6 @@ use windows::{
 const WM_RESULT: u32 = WM_APP + 1;
 /// A pronunciation finished downloading.
 const WM_CLIP: u32 = WM_APP + 2;
-/// The player ended (lparam 0) or failed (lparam 1); wparam is the sound's serial.
-const WM_SOUND: u32 = WM_APP + 3;
 /// Another launch asks the running copy to show the card.
 const WM_SHOW: u32 = WM_APP + 5;
 /// The capture thread queued work for the card.
@@ -79,6 +77,13 @@ const INSTANCE: windows::core::PCWSTR = w!("Local\\WordSide-local.wordside.dicti
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// Drives the hovered row's pop-up, which runs for `LIFT_TIME`.
 const LIFT_TIMER: usize = 2;
+/// While the audio stream is open: notices when a sound ends, and closes the stream once
+/// none has played for `SPEAKER_IDLE`.
+const SOUND_TIMER: usize = 4;
+const SOUND_POLL_MS: u32 = 50;
+/// Readings clicked in quick succession share one stream; after this it closes, so the card
+/// costs nothing while it is only being read.
+const SPEAKER_IDLE: std::time::Duration = std::time::Duration::from_secs(8);
 const LIFT_TIME: std::time::Duration = std::time::Duration::from_millis(220);
 /// Grayscale contrast for text on glass; Windows' default is 1.0. See `glass_text_params`.
 const GLASS_TEXT_CONTRAST: f32 = 1.6;
@@ -117,6 +122,8 @@ struct App {
     d2d: ID2D1Factory,
     dwrite: IDWriteFactory,
     target: Option<ID2D1HwndRenderTarget>,
+    /// How glass text renders on this target; None when the card is opaque (ClearType).
+    text_params: Option<TextParams>,
     frame: Frame,
     content: Content,
     query: String,
@@ -127,6 +134,9 @@ struct App {
     hover: Option<(i32, Instant)>,
     /// The keyboard moved the selection last, so the selected row floats, not the hovered one.
     keyboard: bool,
+    /// The button went down on a strip that scrolls: which, where, its scroll then, and
+    /// whether it has moved far enough to be a drag rather than a click.
+    strip_press: Option<(Strip, f32, f32, bool)>,
     pinned: bool,
     choice: ThemeChoice,
     dark: bool,
@@ -138,7 +148,10 @@ struct App {
     sound: Option<(u64, usize)>,
     sound_serial: u64,
     sound_task: Option<tokio::task::JoinHandle<()>>,
-    player: Option<Player>,
+    /// The audio stream, open while readings are being played; see `audio`.
+    speaker: Option<Speaker>,
+    /// When a sound last stopped, to close the stream once it has been idle a while.
+    last_heard: Option<Instant>,
     /// Sounds of the current entry, so replaying doesn't download again.
     clips: HashMap<String, Vec<u8>>,
     settings: Settings,
@@ -198,37 +211,50 @@ fn option(name: &str) -> Option<String> {
 /// - From 150% up, strokes have pixels to spare: smooth both ways, with extra contrast
 ///   so grayscale text doesn't come out thin.
 /// - Below that (1080p at 100% or 125%) a stem is one or two pixels. Unaligned and with
-///   that much contrast it smeared and looked bold, so lines snap to the pixel grid and
-///   the contrast comes down to near Windows' own.
-fn glass_text_params(dwrite: &IDWriteFactory, dpi: f32) -> Option<IDWriteRenderingParams> {
+///   that much contrast it smeared and looked bold, so the contrast comes down to near
+///   Windows' own, and Latin lines snap to the pixel grid. Chinese doesn't: snapping
+///   moves each character's strokes on its own, and a line comes out uneven.
+fn glass_text_params(dwrite: &IDWriteFactory, dpi: f32) -> Option<TextParams> {
     unsafe {
         let defaults = dwrite.CreateRenderingParams().ok()?;
         let factory = dwrite.cast::<IDWriteFactory2>().ok()?;
-        let (contrast, mode, grid) = if dpi >= 144.0 {
-            (
+        let params = |contrast, mode, grid| {
+            factory
+                .CreateCustomRenderingParams(
+                    defaults.GetGamma(),
+                    defaults.GetEnhancedContrast(),
+                    contrast,
+                    0.0,
+                    DWRITE_PIXEL_GEOMETRY_FLAT,
+                    mode,
+                    grid,
+                )
+                .ok()
+                .and_then(|params| params.cast::<IDWriteRenderingParams>().ok())
+        };
+        if dpi >= 144.0 {
+            let smooth = params(
                 GLASS_TEXT_CONTRAST,
                 DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
                 DWRITE_GRID_FIT_MODE_DEFAULT,
-            )
-        } else {
-            (
+            )?;
+            return Some(TextParams {
+                latin: smooth.clone(),
+                han: smooth,
+            });
+        }
+        Some(TextParams {
+            latin: params(
                 GLASS_TEXT_CONTRAST_LOW_DPI,
                 DWRITE_RENDERING_MODE_NATURAL,
                 DWRITE_GRID_FIT_MODE_ENABLED,
-            )
-        };
-        factory
-            .CreateCustomRenderingParams(
-                defaults.GetGamma(),
-                defaults.GetEnhancedContrast(),
-                contrast,
-                0.0,
-                DWRITE_PIXEL_GEOMETRY_FLAT,
-                mode,
-                grid,
-            )
-            .ok()
-            .and_then(|params| params.cast().ok())
+            )?,
+            han: params(
+                GLASS_TEXT_CONTRAST_LOW_DPI,
+                DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
+                DWRITE_GRID_FIT_MODE_DISABLED,
+            )?,
+        })
     }
 }
 
@@ -353,6 +379,37 @@ impl App {
         self.scroll = self.scroll.clamp(0.0, self.frame.max_scroll());
     }
 
+    /// Scrolls a strip sideways to `to`, as far as it goes.
+    fn scroll_strip(&mut self, strip: Strip, to: f32) {
+        let to = to.clamp(0.0, self.frame.max_strip_scroll(strip));
+        if let Content::Entry(view) = &mut self.content {
+            let scroll = match strip {
+                Strip::Tabs => &mut view.tab_scroll,
+                Strip::Readings => &mut view.reading_scroll,
+            };
+            if to != *scroll {
+                *scroll = to;
+                self.rebuild();
+            }
+        }
+    }
+
+    /// Brings the selected tab fully into view.
+    fn reveal_tab(&mut self) {
+        if let Content::Entry(view) = &self.content {
+            let to = self.frame.reveal_tab(view.tab, view.tab_scroll);
+            self.scroll_strip(Strip::Tabs, to);
+        }
+    }
+
+    fn strip_scroll(&self, strip: Strip) -> f32 {
+        match (&self.content, strip) {
+            (Content::Entry(view), Strip::Tabs) => view.tab_scroll,
+            (Content::Entry(view), Strip::Readings) => view.reading_scroll,
+            _ => 0.0,
+        }
+    }
+
     fn fit(&self) {
         let scale = window_dpi(self.hwnd) as f32 / 96.0;
         let width = (WIDTH * scale).ceil() as i32;
@@ -408,11 +465,11 @@ impl App {
                 presentOptions: D2D1_PRESENT_OPTIONS_NONE,
             };
             let target = self.d2d.CreateHwndRenderTarget(&props, &hwnd_props)?;
-            if self.glass {
-                if let Some(params) = glass_text_params(&self.dwrite, dpi) {
-                    target.SetTextRenderingParams(&params);
-                }
-            }
+            self.text_params = if self.glass {
+                glass_text_params(&self.dwrite, dpi)
+            } else {
+                None
+            };
             self.target = Some(target);
         }
         Ok(())
@@ -425,6 +482,7 @@ impl App {
             target: &target,
             theme: self.theme(),
             glass: self.glass,
+            text: self.text_params.as_ref(),
             frame: &self.frame,
             scroll: self.scroll,
             mouse: self.mouse,
@@ -456,6 +514,13 @@ impl App {
     }
 
     fn submit(&mut self, refresh: bool) {
+        self.look_up(refresh, false);
+    }
+
+    /// `selected`: the word came from a selection, which may have caught some of its
+    /// neighbours; if the dictionary lacks it, its fallbacks are tried. Typed words are
+    /// looked up as typed.
+    fn look_up(&mut self, refresh: bool, selected: bool) {
         let Some(word) = selected_word(&self.query) else {
             self.show_failure(FailureView::invalid_input());
             return;
@@ -474,8 +539,12 @@ impl App {
         let (runtime, service) = runtime();
         let service = service.clone();
         let hwnd = self.hwnd.0 as isize;
+        let mut words = vec![word.clone()];
+        if selected {
+            words.extend(fallback_words(&word));
+        }
         self.task = Some(runtime.spawn(async move {
-            let result = service.lookup(&word, refresh).await;
+            let (word, result) = service.lookup_selection(words, refresh).await;
             *ANSWER.lock().unwrap() = Some((serial, word, result));
             unsafe {
                 let _ = PostMessageW(Some(HWND(hwnd as *mut _)), WM_RESULT, WPARAM(0), LPARAM(0));
@@ -492,6 +561,11 @@ impl App {
         }
         self.task = None;
         self.scroll = 0.0;
+        // A fallback was found: the box shows what was looked up, and Retry asks for it.
+        if word != self.last_word {
+            self.query = word.clone();
+            self.last_word = word.clone();
+        }
         self.content = match result {
             Ok(entry) => Content::Entry(Box::new(EntryView::new(entry))),
             Err(error) => Content::Failure(FailureView::from_error(&error, &word)),
@@ -504,7 +578,10 @@ impl App {
         if let Some(task) = self.sound_task.take() {
             task.abort();
         }
-        self.player = None;
+        if let Some(speaker) = &mut self.speaker {
+            speaker.stop();
+            self.last_heard = Some(Instant::now());
+        }
         self.sound = None;
         if let Content::Entry(view) = &mut self.content {
             view.stop_sounds();
@@ -555,39 +632,59 @@ impl App {
         let Some((serial, url, clip)) = CLIP.lock().unwrap().take() else {
             return;
         };
-        let Some((current, index)) = self.sound.filter(|(current, _)| *current == serial) else {
+        let Some((_, index)) = self.sound.filter(|(current, _)| *current == serial) else {
             return;
         };
         self.sound_task = None;
         let name = option("--sound").unwrap_or_else(|| audio::clip_name(&url).to_owned());
         let played = clip.ok().and_then(|clip| {
-            let player = Player::play(self.hwnd, WM_SOUND, current as usize, &name, &clip).ok();
+            let pcm = audio::decode(&name, &clip).ok();
             self.clips.insert(url, clip);
-            player
+            let pcm = pcm?;
+            if self.speaker.is_none() {
+                self.speaker = Speaker::open().ok();
+            }
+            self.speaker.as_mut()?.play(&pcm).ok()
         });
         let sound = if played.is_some() {
+            unsafe {
+                let _ = SetTimer(Some(self.hwnd), SOUND_TIMER, SOUND_POLL_MS, None);
+            }
             Sound::Playing
         } else {
             self.sound = None;
             Sound::Failed
         };
-        self.player = played;
         if let Content::Entry(view) = &mut self.content {
             view.set_sound(index, sound);
         }
         self.rebuild();
     }
 
-    fn sound_ended(&mut self, serial: u64, failed: bool) {
-        let Some((_, index)) = self.sound.filter(|(current, _)| *current == serial) else {
-            return;
-        };
-        self.player = None;
-        self.sound = None;
-        if let Content::Entry(view) = &mut self.content {
-            view.set_sound(index, if failed { Sound::Failed } else { Sound::Idle });
+    /// The sound playing has ended; the stream closes after a while with nothing played.
+    fn poll_sound(&mut self) {
+        let playing = self.speaker.as_ref().is_some_and(Speaker::playing);
+        if let (false, Some((_, index)), None) = (playing, self.sound, &self.sound_task) {
+            if let Some(speaker) = &mut self.speaker {
+                speaker.stop();
+            }
+            self.sound = None;
+            self.last_heard = Some(Instant::now());
+            if let Content::Entry(view) = &mut self.content {
+                view.set_sound(index, Sound::Idle);
+            }
+            self.rebuild();
         }
-        self.rebuild();
+        let idle = self.sound.is_none()
+            && self
+                .last_heard
+                .is_none_or(|heard| heard.elapsed() > SPEAKER_IDLE);
+        if idle || self.speaker.is_none() {
+            self.speaker = None;
+            unsafe {
+                let _ = KillTimer(Some(self.hwnd), SOUND_TIMER);
+            }
+        }
     }
 
     fn act(&mut self, action: Action) {
@@ -621,6 +718,7 @@ impl App {
                     view.select_tab(tab);
                     self.scroll = 0.0;
                     self.rebuild();
+                    self.reveal_tab();
                 }
             }
             Action::Sense(index) => {
@@ -696,6 +794,7 @@ impl App {
                 view.next_tab();
                 self.scroll = 0.0;
                 self.rebuild();
+                self.reveal_tab();
             }
         } else if let Content::Entry(view) = &mut self.content {
             if key == VK_DOWN.0 || key == VK_UP.0 {
@@ -1077,6 +1176,8 @@ impl App {
             self.close_settings();
         }
         self.stop_sound();
+        // A hidden card plays nothing, so its audio stream closes now.
+        self.speaker = None;
         self.mouse = None;
         self.rise = None;
         self.target = None;
@@ -1103,7 +1204,7 @@ impl Card for App {
             self.close_settings();
         }
         self.query = word.to_owned();
-        self.submit(false);
+        self.look_up(false, true);
         self.show_near(point);
     }
 
@@ -1138,7 +1239,7 @@ impl Card for App {
 /// card, so they go to a file in the temporary folder, rewritten each time.
 fn open_licenses() {
     let path = std::env::temp_dir().join("WordSide-THIRD-PARTY-LICENSES.txt");
-    if std::fs::write(&path, crate::cli::LICENSES).is_ok() {
+    if std::fs::write(&path, crate::cli::licenses()).is_ok() {
         unsafe {
             ShellExecuteW(
                 None,
@@ -1321,6 +1422,19 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_LBUTTONDOWN => {
                 let (x, y) = scaled_point(hwnd, lparam);
+                // On a strip that scrolls, a drag scrolls it and only a click picks a tab
+                // or plays a reading.
+                let mut pressed = false;
+                with_app(|app| {
+                    if let Some(strip) = app.frame.scrolling_strip_at(x, y) {
+                        app.strip_press = Some((strip, x, app.strip_scroll(strip), false));
+                        pressed = true;
+                    }
+                });
+                if pressed {
+                    SetCapture(hwnd);
+                    return LRESULT(0);
+                }
                 update_and_fit(|app| {
                     if let Some(action) = app.frame.hit(x, y, app.scroll) {
                         app.act(action);
@@ -1328,8 +1442,45 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 });
                 LRESULT(0)
             }
+            WM_LBUTTONUP => {
+                let (x, y) = scaled_point(hwnd, lparam);
+                let mut press = None;
+                with_app(|app| press = app.strip_press.take());
+                if let Some((_, _, _, dragged)) = press {
+                    let _ = ReleaseCapture();
+                    if !dragged {
+                        update_and_fit(|app| {
+                            if let Some(action) = app.frame.hit(x, y, app.scroll) {
+                                app.act(action);
+                            }
+                        });
+                    }
+                    invalidate(hwnd);
+                }
+                LRESULT(0)
+            }
+            WM_CAPTURECHANGED => {
+                with_app(|app| app.strip_press = None);
+                LRESULT(0)
+            }
             WM_MOUSEMOVE => {
                 let point = scaled_point(hwnd, lparam);
+                let mut dragging = false;
+                with_app(|app| {
+                    let Some((strip, x, from, dragged)) = app.strip_press else {
+                        return;
+                    };
+                    dragging = true;
+                    let dx = point.0 - x;
+                    if dragged || dx.abs() > 4.0 {
+                        app.strip_press = Some((strip, x, from, true));
+                        app.scroll_strip(strip, from - dx);
+                    }
+                });
+                if dragging {
+                    invalidate(hwnd);
+                    return LRESULT(0);
+                }
                 let mut entered = false;
                 with_app(|app| {
                     entered = app.mouse.is_none();
@@ -1387,6 +1538,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 }
                 LRESULT(0)
             }
+            WM_TIMER if wparam.0 == SOUND_TIMER => {
+                update_and_fit(|app| app.poll_sound());
+                LRESULT(0)
+            }
             WM_TIMER if wparam.0 == LIFT_TIMER => {
                 let mut running = false;
                 with_app(|app| {
@@ -1400,11 +1555,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 invalidate(hwnd);
                 LRESULT(0)
             }
-            WM_MOUSEWHEEL => {
-                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as f32;
+            // Over a strip that doesn't all fit, the wheel and a touchpad's sideways swipe
+            // scroll it; elsewhere the wheel scrolls the senses.
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+                let delta = ((wparam.0 >> 16) & 0xffff) as i16 as f32 / 120.0 * 48.0;
                 with_app(|app| {
-                    app.scroll =
-                        (app.scroll - delta / 120.0 * 48.0).clamp(0.0, app.frame.max_scroll())
+                    let strip = app
+                        .mouse
+                        .and_then(|(x, y)| app.frame.scrolling_strip_at(x, y));
+                    if let Some(strip) = strip {
+                        let step = if msg == WM_MOUSEHWHEEL { delta } else { -delta };
+                        app.scroll_strip(strip, app.strip_scroll(strip) + step);
+                    } else if msg == WM_MOUSEWHEEL {
+                        app.scroll = (app.scroll - delta).clamp(0.0, app.frame.max_scroll());
+                    }
                 });
                 invalidate(hwnd);
                 LRESULT(0)
@@ -1570,10 +1734,6 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_CLIP => {
                 update_and_fit(|app| app.receive_clip());
-                LRESULT(0)
-            }
-            WM_SOUND => {
-                update_and_fit(|app| app.sound_ended(wparam.0 as u64, lparam.0 != 0));
                 LRESULT(0)
             }
             WM_DESTROY => {
@@ -1746,6 +1906,7 @@ pub fn run() -> Result<()> {
             d2d: D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?,
             dwrite: DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?,
             target: None,
+            text_params: None,
             frame: Frame::default(),
             content,
             query,
@@ -1753,6 +1914,7 @@ pub fn run() -> Result<()> {
             mouse: None,
             hover: None,
             keyboard: false,
+            strip_press: None,
             pinned: false,
             choice,
             dark: true,
@@ -1763,7 +1925,8 @@ pub fn run() -> Result<()> {
             sound: None,
             sound_serial: 0,
             sound_task: None,
-            player: None,
+            speaker: None,
+            last_heard: None,
             clips: HashMap::new(),
             settings: preferences,
             settings_path,

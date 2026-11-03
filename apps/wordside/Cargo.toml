@@ -9,17 +9,29 @@ description = "A small, quiet selection dictionary for Windows"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip", "system-proxy"] }
+# Windows' own TLS (Schannel) and certificate store, instead of shipping rustls and ring.
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "gzip", "system-proxy"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "sync", "net", "io-util"] }
 dom_query = { version = "=0.28.0", default-features = false }
-regex = "1"
+# The parser's two patterns; see dictionary/parser.rs for why the light engine is enough.
+regex-lite = "0.1"
 windows-numerics = "0.3"
+# ASCII-only host names: Cambridge and proxies never need internationalized ones, and this
+# leaves out the ICU tables `url` would otherwise bring.
+idna_adapter = "=1.0.0"
+# Inflates the third-party notices, which the build stores compressed.
+miniz_oxide = "0.9"
 # Named directly because the `implement` macro (pronunciation callback) expands to it.
 windows-core = "0.62"
+
+[build-dependencies]
+miniz_oxide = "0.9"
 
 [dev-dependencies]
 # Capture tests write their probe and status files into temporary folders.
 tempfile = "3"
+# Checks that regex-lite matches the parser's patterns as the full engine does.
+regex = "1"
 
 [dependencies.windows]
 version = "0.62"
@@ -40,6 +52,8 @@ features = [
     "Win32_System_Variant",
     "Win32_UI_Accessibility",
     "Win32_System_DataExchange",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_XAudio2",
     "Win32_Media_MediaFoundation",
     "Win32_Security",
     "Win32_System_Com",
@@ -59,7 +73,7 @@ features = [
 dbg_macro = "warn"
 
 [profile.release]
-opt-level = "s"
+opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"

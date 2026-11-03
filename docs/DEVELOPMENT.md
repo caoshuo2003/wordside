@@ -107,6 +107,11 @@ cargo build --manifest-path apps/wordside/Cargo.toml --release
   ```
 
   不要直接跑 `--ignored`：`helper_process`、`fixture_process`、`private_clipboard_process` 是给上面这些测试启动的子进程入口，单独运行会一直等输入。
+- 发音播放要真实的声音设备，也标了 `#[ignore]`：音量设为 0，听不到声音，检查每次播放从第一个样本放到最后、快速切换时新的一段从头开始。
+
+  ```powershell
+  cargo test --manifest-path apps/wordside/Cargo.toml -- --ignored --exact audio::tests::every_sample_plays_from_the_first
+  ```
 - 第三方许可要在正式编译前生成，否则 exe 里只有一行提示，`check-wordside.ps1` 会判为失败。
 - `check-wordside.ps1 -Runtime` 用临时设置目录启动程序，测托盘待命时的内存和空闲 CPU；不加 `-Runtime` 只做 CI 也能做的静态检查。
 - 安装版：`.\tools\build-installer.ps1 -Exe <exe> -Licenses apps\wordside\generated\THIRD-PARTY-LICENSES.txt -OutDir <目录>`，需要 NSIS（`scoop install extras/nsis`）。安装和卸载可以加 `/S` 静默运行；注意在 Claude 桌面版里运行会写进它的重定向目录，真实安装要在 Claude 外测。

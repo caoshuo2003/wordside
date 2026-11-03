@@ -44,12 +44,31 @@ pub struct EntryView {
     last_sound: Option<usize>,
     pub coverage: Coverage,
     pub tab: usize,
+    /// How far the part-of-speech tabs are scrolled left, when there are more than fit.
+    pub tab_scroll: f32,
+    /// Likewise the readings, when they are on a line of their own and don't fit it.
+    pub reading_scroll: f32,
     pub selected: usize,
     pub expanded: Option<usize>,
 }
 
+/// The page's own line breaks and indentation, which the parser keeps as they are
+/// (`form of\n\n        be`), read as single spaces on the card.
+fn tidy(text: &mut String) {
+    let tidied = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    *text = tidied;
+}
+
 impl EntryView {
-    pub fn new(entry: Entry) -> Self {
+    pub fn new(mut entry: Entry) -> Self {
+        for definition in &mut entry.definitions {
+            tidy(&mut definition.text);
+            tidy(&mut definition.translation);
+            for example in &mut definition.examples {
+                tidy(&mut example.text);
+                tidy(&mut example.translation);
+            }
+        }
         let mut groups: Vec<PosGroup> = Vec::new();
         for definition in &entry.definitions {
             let (label, key) = pos_label(&definition.pos);
@@ -89,6 +108,8 @@ impl EntryView {
             tab_chips,
             coverage,
             tab: 0,
+            tab_scroll: 0.0,
+            reading_scroll: 0.0,
             selected: 0,
             // Examples open on request; the card first shows only the senses.
             expanded: None,
@@ -115,6 +136,8 @@ impl EntryView {
     pub fn select_tab(&mut self, tab: usize) {
         if tab < self.groups.len() {
             self.tab = tab;
+            // Each part of speech has readings of its own.
+            self.reading_scroll = 0.0;
             self.selected = 0;
             self.expanded = None;
         }
@@ -407,6 +430,21 @@ mod tests {
     }
     fn view(definitions: Vec<serde_json::Value>) -> EntryView {
         EntryView::new(read_api_entry(&json!({"entry":{"word":"run","pos":[],"definition":definitions,"pronunciation":[]}}), "run", "en-cn").unwrap())
+    }
+
+    #[test]
+    fn page_line_breaks_inside_a_sense_read_as_spaces() {
+        let card = view(vec![json!({
+            "pos": "verb",
+            "text": "we/you/they form of\n\n        be",
+            "translation": " （主语为we、you和they时）\n是 ",
+            "example": [{"text": "Are you\n   hungry?", "translation": "你饿吗？\n"}]
+        })]);
+        let sense = &card.entry.definitions[0];
+        assert_eq!(sense.text, "we/you/they form of be");
+        assert_eq!(sense.translation, "（主语为we、you和they时） 是");
+        assert_eq!(sense.examples[0].text, "Are you hungry?");
+        assert_eq!(sense.examples[0].translation, "你饿吗？");
     }
 
     #[test]
