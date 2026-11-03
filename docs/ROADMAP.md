@@ -6,7 +6,6 @@
 |---|---|---|---|
 | 近期 | 卡片记住位置、调整宽度、多显示器与 DPI（N4） | 拖动后的位置和宽度重启后保留；跨屏、缩放下位置正确 | `feat/card-placement` |
 | 近期 | 自动划词时空闲 CPU 接近 0 | 用事件代替 20 ms 轮询，取词时序不变，实测记录 | `feat/capture-events` |
-| 近期 | 退役 0.2.0 的 `desktop/`（N5） | 删除 Tauri 工程和前端，CI 与发布只围绕 `apps/wordside` | `chore/retire-desktop` |
 | 近期 | Windows 手动验收矩阵 | 选区、快捷键、焦点、托盘、DPI 与安装各有真实记录 | `test/windows-acceptance` |
 | 近期 | Cambridge 短语跳转 | 精确核对查询与头词，避免无关跳转，保留合法别名 | `fix/phrase-resolution` |
 | 近期 | 冷查询耗时分析 | 分开测连接、网页、解析与 UI，区分缓存/网络 | `exp/lookup-latency` |

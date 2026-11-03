@@ -4,9 +4,9 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { basename, dirname, join } from 'node:path';
 const root=dirname(dirname(fileURLToPath(import.meta.url)));
-// `--crate apps/wordside` collects the new native app's notices; without it, 0.2.0's.
+// The app's crate; `--crate <folder>` names another.
 const crateArg=process.argv.indexOf('--crate');
-const native=join(root,crateArg>0?process.argv[crateArg+1]:'desktop/src-tauri');
+const native=join(root,crateArg>0?process.argv[crateArg+1]:'apps/wordside');
 const metadata=spawnSync('cargo',['metadata','--locked','--format-version','1','--filter-platform','x86_64-pc-windows-msvc'],{cwd:native,encoding:'utf8',windowsHide:true,maxBuffer:32*1024*1024});
 if(metadata.status!==0){process.stderr.write(metadata.stderr||'Cargo metadata failed\n');process.exit(metadata.status||1);}
 const data=JSON.parse(metadata.stdout),packages=new Map(data.packages.map(pkg=>[pkg.id,pkg]));
@@ -23,17 +23,12 @@ function licenseFiles(folder,depth=0){
  }
  return files;
 }
-const version=crateArg>0?packages.get(data.resolve.root).version:JSON.parse(readFileSync(join(root,'desktop/package.json'),'utf8')).version;
+const version=packages.get(data.resolve.root).version;
 const sections=[`WordSide ${version}\nWindows x64 native distribution; no Node runtime or JavaScript API dependencies are bundled.\nThis list includes native transitive/build dependencies conservatively.`,
  'Cambridge parser port derived from Nongfsq/cambridge-dictionary-api\n'+readFileSync(join(root,'modules/cambridge-dictionary-api/LICENSE.txt'),'utf8')];
 const missing=[];
 const fallback={
- 'alloc-stdlib@0.3.0':['alloc-stdlib-BSD-3-Clause.txt'],
- 'defmt-parser@1.0.0':['defmt-parser-MIT.txt','defmt-parser-APACHE.txt'],
  'selectors@0.38.0':['selectors-MPL-2.0.txt'],
- 'webview2-com@0.39.1':['webview2-rs-MIT.txt'],
- 'webview2-com-macros@0.8.1':['webview2-rs-MIT.txt'],
- 'webview2-com-sys@0.39.1':['webview2-rs-MIT.txt'],
 };
 const notices=[];
 for(const pkg of [...selected].map(id=>packages.get(id)).filter(pkg=>pkg.source).sort((a,b)=>a.name.localeCompare(b.name)||a.version.localeCompare(b.version))){

@@ -1,8 +1,8 @@
 name: WordSide
 
-# The app that ships (apps/wordside). Runs on pull requests that change it, the tools its
-# checks use, or this file; a merge to main is not checked again, since its pull request
-# was. Documentation alone runs nothing. Run it by hand from Actions when wanted.
+# Runs on pull requests that change the app, the tools its checks use, or this file; a
+# merge to main is not checked again, since its pull request was. Documentation alone runs
+# nothing. Run it by hand from Actions when wanted.
 on:
   pull_request:
     branches: [main]
@@ -69,7 +69,7 @@ jobs:
           }
           exit 1
       - name: Third-party notices
-        run: node tools/build-licenses.mjs --crate apps/wordside
+        run: node tools/build-licenses.mjs
       - name: Release build
         run: cargo build --manifest-path apps/wordside/Cargo.toml --locked --release
       - name: Release check (size, notices, diagnostic entries)

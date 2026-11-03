@@ -1,9 +1,4 @@
 node_modules/
-desktop/dist/
-desktop/app.js
-desktop/src-tauri/target/
-desktop/src-tauri/dictionary-runtime/
-desktop/src-tauri/generated/
 apps/wordside/generated/
 release/
 .delivery/
@@ -22,7 +17,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Machine-specific agent notes and generated Tauri schemas are not product source.
+# Machine-specific agent notes are not product source.
 /AGENTS.local.md
 /WORK-STATUS.md
-desktop/src-tauri/gen/

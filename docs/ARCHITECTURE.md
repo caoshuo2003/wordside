@@ -1,8 +1,8 @@
 # 架构与边界
 
-现在有两套代码：发布中的 0.2.0（`desktop/`，Tauri + TypeScript）和正在做的 0.3.0 原生卡片（`apps/wordside/`，纯 Rust）。0.3.0 切换发布后删除 `desktop/` 和本文后半部分的 0.2.0 说明。计划见[产品开发文档](PRODUCT-DEVELOPMENT.md)。
+代码只有一个纯 Rust 的工程 `apps/wordside/`。0.2.0（`desktop/`，Tauri + TypeScript）在 0.3.1 之后删除，取词层和读取单词 API 是从它整体搬来的；需要对照旧代码时看 `v0.2.0` 标签。计划见[产品开发文档](PRODUCT-DEVELOPMENT.md)。
 
-## 0.3.0 原生卡片（apps/wordside）
+## 结构
 
 ```mermaid
 flowchart LR
@@ -28,45 +28,19 @@ flowchart LR
 | `tray.rs`、`menu.rs`、`icon.rs` | 托盘图标和菜单、系统弹出菜单、代码绘制的图标（托盘现画，软件图标导出为 `assets/wordside.ico`） |
 | `audio.rs` | 只从 Cambridge 下载发音到内存，用 Media Foundation 解码、XAudio2 播放，不写磁盘；连续播放共用一条输出流，免得开头被吞 |
 | `service.rs`、`lookup.rs`、`cache.rs` | 查询编排：按词门控、内存缓存、英汉缺词回退英英、取消 |
-| `entry.rs`、`presentation.rs` | 词条校验（移植自 `shared/dictionary.ts`）、提示文案（移植自 `presentation.ts`） |
-| `dictionary/` | 读取单词 API，从 `desktop/` 原样搬来 |
-| `shortcut.rs`、`selection_input.rs` | 快捷键文本解析、输入清理，从 0.2.0 原样复制 |
+| `entry.rs`、`presentation.rs` | 词条校验、提示文案（移植自 0.2.0 的 `shared/dictionary.ts`、`presentation.ts`） |
+| `dictionary/` | 读取单词 API，从 0.2.0 原样搬来 |
+| `capture/` | Windows 选区、快捷键、源窗口与读取隔离、复制校对，从 0.2.0 整体搬来 |
+| `shortcut.rs`、`selection_input.rs` | 快捷键文本解析；输入清理（见下文） |
 | `build.rs` | 把第三方许可清单和图标编进 exe |
-
-## 0.2.0（desktop）
-
-```mermaid
-flowchart LR
-    A[Windows 选区 / 快捷键] --> B[源窗口校验与后台取词]
-    B --> C[Tauri / Rust]
-    D[手动输入] --> C
-    C --> E[输入清理与内存缓存]
-    E --> F[复用 HTTP 连接]
-    F --> G[Cambridge 网页]
-    G --> H[完整性校验与 Rust 解析]
-    H --> I[共享 JSON 校验]
-    I --> J[TypeScript 释义界面]
-```
 
 ## 为什么保留 JS 模块
 
-Cambridge 解析基于 Nongfsq 项目。`modules/cambridge-dictionary-api/` 保留其本机改版、原始解析器和 MIT 来源，用作 Rust 移植的行为对照；它可独立运行，但桌面不会启动 JS 服务，也不打包 Node。
+Cambridge 解析基于 Nongfsq 项目。`modules/cambridge-dictionary-api/` 保留其本机改版、原始解析器和 MIT 来源，用作 Rust 移植的行为对照，并由 `tools/generate-native-fixtures.cjs` 生成解析测试数据；它可独立运行，但程序不会启动 JS 服务，也不打包 Node。
 
-## 模块职责
+## 输入清理
 
-| 位置 | 责任 |
-|---|---|
-| `desktop/src-tauri/src/capture/` | Windows 选区、快捷键、源窗口与读取隔离、复制校对 |
-| `dictionary.rs`、`dictionary/http.rs` | 惰性连接池、并发限制、超时、取消和退出 |
-| `dictionary/parser.rs` | Nongfsq 解析移植、词条完整性与候选校验 |
-| `shared/dictionary.ts` | JSON 解码、输入清理和稳定错误类别 |
-| `desktop/src/presentation.ts` | 面向用户的提示，不直接渲染原始诊断 |
-| `desktop/src/app.ts` | 词条/例句/候选、查询序列与过期结果隔离 |
-| `desktop/src/native.ts` | 设置同步、选词事件、浮窗拖动/缩放 |
-| `popup_geometry.rs` | 逻辑尺寸偏好、布局/DPI 事件处理与合并保存 |
-| `window_lifecycle.rs` | 主窗口关闭方式、释义关闭与托盘双击策略 |
-
-输入清理由 Rust `selection_input.rs` 和前端共享模块执行，使用同一份 JSON 样例校验。自动取词、快捷键、剪贴板兼容记录与手动查询都清理首尾标点及连字符；仅将词内 U+2010/U+2011 转为 ASCII 连字符，保留词内撇号。内嵌路径分隔符、换行及控制字符仍拒绝，不从无效内容中猜取一个子词。
+自动取词、快捷键和手动查询都经过 `selection_input.rs`，用例在 `apps/wordside/tests/fixtures/selection-cases.json`。首尾的标点、符号、紧挨着的中文和脚注标记去掉，越过句号或逗号多选到的一两个字母也去掉；词内撇号保留，U+2010/U+2011 转成 ASCII 连字符。路径分隔符、换行、控制字符、命令选项和词内其他符号仍然拒绝，不从这类内容里猜一个词。只有划词得到的词，查不到时才再试去掉首尾数字或旁边单词残片的写法（`fallback_words`）。
 
 ## 关键规则
 
@@ -74,7 +48,7 @@ Cambridge 解析基于 Nongfsq 项目。`modules/cambridge-dictionary-api/` 保�
 2. 只将明确缺词视为缺词；网络、超时、阻拦、残缺内容分别处理。
 3. 英汉明确缺词才尝试英英；最终缺词时展示候选，点击才查询。
 4. 完整结果校验后才缓存，词条仅在内存；取消/旧请求不能覆盖新词。
-5. 设置按内存版本同步，旧响应不覆盖新选择；保存失败恢复已确认值。
+5. 设置先写临时文件再替换，保存失败保留原值。
 6. Windows 取词留在平台适配层；未来其他平台使用独立实现。
 
 ## 通用选词校对
