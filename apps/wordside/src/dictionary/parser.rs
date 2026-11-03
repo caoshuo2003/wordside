@@ -2,22 +2,22 @@
 //! Preserve raw descendant text, field names and source order. See UPSTREAM.md.
 use super::QueryError;
 use dom_query::{Document, Selection};
-use regex::Regex;
+// regex-lite matches these two patterns exactly as the full engine would (they need ASCII
+// case folding only, and `[\s\S]` is any character either way) at a third of the exe's
+// size less; `regex_lite_matches_the_full_engine` checks that.
+use regex_lite::Regex;
 use reqwest::Url;
 use serde_json::{json, Value};
 use std::{collections::HashSet, sync::LazyLock};
 
 pub const SITE: &str = "https://dictionary.cambridge.org";
-static COMPLETE: LazyLock<Regex> = LazyLock::new(|| {
+fn complete_pattern() -> String {
     let ws = r"[\t\n\x0B\f\r \u{00A0}\u{FEFF}\u{1680}\u{2000}-\u{200A}\u{2028}\u{2029}\u{202F}\u{205F}\u{3000}]";
-    Regex::new(&format!(
-        r"(?is)</html{ws}*>{ws}*(?:<!--[\s\S]*?-->{ws}*)*$"
-    ))
-    .unwrap()
-});
-static LANDING: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^https://dictionary\.cambridge\.org/(?:us/|uk/)?dictionary/english(?:-chinese-simplified|-chinese-traditional)?/$").unwrap()
-});
+    format!(r"(?is)</html{ws}*>{ws}*(?:<!--[\s\S]*?-->{ws}*)*$")
+}
+const LANDING_PATTERN: &str = r"^https://dictionary\.cambridge\.org/(?:us/|uk/)?dictionary/english(?:-chinese-simplified|-chinese-traditional)?/$";
+static COMPLETE: LazyLock<Regex> = LazyLock::new(|| Regex::new(&complete_pattern()).unwrap());
+static LANDING: LazyLock<Regex> = LazyLock::new(|| Regex::new(LANDING_PATTERN).unwrap());
 
 fn document(html: &str) -> Result<Document, QueryError> {
     if !COMPLETE.is_match(html) {
@@ -315,6 +315,80 @@ mod tests {
                     case["name"]
                 );
             }
+        }
+    }
+    /// The full engine, which 0.3.0 shipped, and regex-lite agree on every page ending and
+    /// address, including the odd ones: case, Unicode spaces, comments holding `-->`.
+    #[test]
+    fn regex_lite_matches_the_full_engine() {
+        let (full, lite) = (
+            regex::Regex::new(&complete_pattern()).unwrap(),
+            Regex::new(&complete_pattern()).unwrap(),
+        );
+        let starts = ["", "<html><body>x</body>", "<HTML lang=\"en\">", "</html>"];
+        let ends = [
+            "</html>",
+            "</HTML>",
+            "</HtMl >",
+            "</html\u{3000}\u{00A0}>",
+            "</html\r\n>",
+            "</html",
+            "</htmlx>",
+            "</ html>",
+            "</html>>",
+            "<\\/html>",
+            "</ſtml>",
+            "</HTML\u{212A}>",
+        ];
+        let tails = [
+            "",
+            " ",
+            "\u{00A0}\u{FEFF}\n",
+            "<!-- c -->",
+            "<!-- a --> <!-- b -->\u{2028}",
+            "<!-- a --> b -->",
+            "<!-- x",
+            "-->",
+            "<!---->",
+            "<!-- \u{2028} -->\u{3000}",
+            " junk",
+            "<!-- a -->x",
+            "\u{0085}",
+            "\u{200B}",
+            "<!-- 中文 -->",
+            "<!-- <!-- -->",
+        ];
+        let mut checked = 0;
+        for start in starts {
+            for end in ends {
+                for tail in tails {
+                    for page in [
+                        format!("{start}{end}{tail}"),
+                        format!("{start}{end}{tail}{end}"),
+                    ] {
+                        assert_eq!(full.is_match(&page), lite.is_match(&page), "{page:?}");
+                        checked += 1;
+                    }
+                }
+            }
+        }
+        assert!(checked > 1000);
+        let (full, lite) = (
+            regex::Regex::new(LANDING_PATTERN).unwrap(),
+            Regex::new(LANDING_PATTERN).unwrap(),
+        );
+        for address in [
+            "https://dictionary.cambridge.org/dictionary/english/",
+            "https://dictionary.cambridge.org/us/dictionary/english-chinese-simplified/",
+            "https://dictionary.cambridge.org/uk/dictionary/english-chinese-traditional/",
+            "https://dictionary.cambridge.org/zh/dictionary/english/",
+            "https://dictionary.cambridge.org/dictionary/english/record",
+            "HTTPS://DICTIONARY.CAMBRIDGE.ORG/dictionary/english/",
+            "https://dictionaryXcambridge.org/dictionary/english/",
+            "https://dictionary.cambridge.org/dictionary/english-chinese-simplified",
+            "",
+        ] {
+            assert_eq!(full.is_match(address), lite.is_match(address), "{address}");
         }
     }
     #[test]

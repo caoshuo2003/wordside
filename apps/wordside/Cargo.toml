@@ -13,8 +13,8 @@ serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls", "gzip", "system-proxy"] }
 tokio = { version = "1", features = ["rt-multi-thread", "time", "macros", "sync", "net", "io-util"] }
 dom_query = { version = "=0.28.0", default-features = false }
-# The parser's patterns need \s and case folding only, not the other Unicode tables.
-regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl", "unicode-case"] }
+# The parser's two patterns; see dictionary/parser.rs for why the light engine is enough.
+regex-lite = "0.1"
 windows-numerics = "0.3"
 # ASCII-only host names: Cambridge and proxies never need internationalized ones, and this
 # leaves out the ICU tables `url` would otherwise bring.
@@ -30,6 +30,8 @@ miniz_oxide = "0.9"
 [dev-dependencies]
 # Capture tests write their probe and status files into temporary folders.
 tempfile = "3"
+# Checks that regex-lite matches the parser's patterns as the full engine does.
+regex = "1"
 
 [dependencies.windows]
 version = "0.62"

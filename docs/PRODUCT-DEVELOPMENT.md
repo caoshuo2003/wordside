@@ -171,7 +171,7 @@ apps/wordside/src/
 | 图标 | 用 Direct2D 在代码里画；托盘按需现画，软件图标用 `--export-icon` 导出成 `assets/wordside.ico`，由 `build.rs` 调 Windows SDK 的 `rc.exe` 嵌进 exe | 不加构建依赖；托盘图标在任何缩放下都清晰并能随任务栏变色；找不到 `rc.exe` 时照常编译，只是没有图标 |
 | 托盘和右键菜单 | 系统菜单，不自绘 | 跟随系统主题，屏幕阅读器可读，不占内存 |
 | 第三方许可 | `tools/build-licenses.mjs --crate apps/wordside` 生成，`build.rs` 压缩后编进 exe；设置页里点开时解压、写到临时文件夹用文本编辑器打开 | 单个 exe 也带着许可；约 290 KB 放不进卡片，压缩后只占 31 KB |
-| 体积 | `opt-level = "z"`，regex 只留 `\s` 和大小写折叠用到的 Unicode 表 | 0.3.0 的 4.24 MB 降到 2.46 MB；480 页解析耗时与 `"s"` 相同（约 220 ms） |
+| 体积 | `opt-level = "z"`；解析器的两个正则改用 regex-lite，完整的 regex 只留在测试里比对两者 | 0.3.0 的 4.24 MB 降到 1.83 MB，安装包 0.81 MB。`"z"` 与 `"s"` 解析 480 页都约 220 ms；regex-lite 在 2.85 MB 的页面上慢约 50 ms，真实页面一两百 KB，只差几毫秒。解析输出与 0.3.0 逐字节相同。曾测过但不做的：tokio 单线程只省 22 KB；UPX 压缩容易被杀毒软件误报 |
 
 **这次要解决的旧问题：** `main.rs` 职责过多；设置更新重复 4 次；5 个计数器的递增散落各处；取词判断和 `unsafe` 调用混在一起；9 个测试用例 CI 从未运行；没有 clippy；CI 单次 17–22 分钟；版本号散落在 6 个文件；发布全部手工。
 
