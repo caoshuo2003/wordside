@@ -69,7 +69,7 @@ const {upstreamResult}=require(path.join(moduleRoot,'tests/upstream-oracle'));
   ['wrong-heading',source.replace('<span class="tb">termnal','<span class="tb">other')],['missing-list',source.replace('class="hul-u"','class="changed"')],
   ['changed-heading',source.replace('Search suggestions for','Changed heading')],['challenge',source.replace('<body>','<body><form id="challenge-form"></form>')]
  ])suggestion(name,page);
- const output=path.join(root,'desktop/src-tauri/tests/fixtures');fs.mkdirSync(output,{recursive:true});
+ const output=path.join(root,'apps/wordside/tests/fixtures');fs.mkdirSync(output,{recursive:true});
  fs.writeFileSync(path.join(output,'native-cambridge.json'),JSON.stringify({origin:'Synthetic compatibility fixtures generated with existing parser and original upstream oracle',pages,suggestions},null,2)+'\n');
  fs.writeFileSync(path.join(output,'entry.html.gz'),zlib.gzipSync(html));
  fs.writeFileSync(path.join(output,'oversize.html.gz'),zlib.gzipSync('x'.repeat(4*1024*1024+1)));

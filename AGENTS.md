@@ -11,33 +11,31 @@
 
 ## 项目概况
 
-Windows x64 划词词典。0.2.0 是 Tauri 2 + Rust + TypeScript；正在按[产品开发文档](docs/PRODUCT-DEVELOPMENT.md)重写为纯 Rust + Direct2D 的极简版本 0.3.0。新代码进 `apps/wordside/`，切换前 `desktop/` 保持可发布。
+Windows x64 极简划词词典：纯 Rust + Direct2D，单个 exe。代码全部在 `apps/wordside/`；0.2.0（Tauri）已在 0.3.1 之后从仓库删除，需要时看 `v0.2.0` 标签。
 
 | 位置 | 内容 |
 |---|---|
-| `desktop/src-tauri/src/capture/` | Windows 取词，风险最高，只拆结构 |
-| `desktop/src-tauri/src/dictionary/`、`lookup.rs` | 读取单词 API，原样保留 |
-| `desktop/src-tauri/src/main.rs` | 应用层，将重写 |
-| `desktop/src/`、`shared/` | 界面将删除；JSON 校验移植到 Rust |
-| `modules/cambridge-dictionary-api/` | 上游 JS 解析器，只用于行为对照，不进发布包 |
+| `apps/wordside/src/capture/` | Windows 取词，从 0.2.0 整体搬来，风险最高：判断逻辑和时序不随手改 |
+| `apps/wordside/src/dictionary/`、`lookup.rs` | 读取单词 API，只搬不改 |
+| `apps/wordside/src/app.rs`、`render.rs`、`card.rs` | 窗口、绘制、卡片状态 |
+| `modules/cambridge-dictionary-api/` | 上游 JS 解析器，用于对照和生成测试数据（`tools/generate-native-fixtures.cjs`），不进发布包 |
 
 ## 常用命令
 
 ```powershell
-npm ci
-npm exec --yes --package=pnpm@9.15.9 -- pnpm --dir modules/cambridge-dictionary-api install --frozen-lockfile
-npm test
-npm run check
-npm run build
-.\tools\windows-cargo.ps1 -Action test
-.\tools\windows-cargo.ps1 -Action test -TestFilter 'capture::copy_policy::'
+cargo fmt --manifest-path apps/wordside/Cargo.toml
+cargo clippy --manifest-path apps/wordside/Cargo.toml --all-targets -- -D warnings
+cargo test --manifest-path apps/wordside/Cargo.toml
+node tools/build-licenses.mjs
+cargo build --manifest-path apps/wordside/Cargo.toml --release
+.\tools\check-wordside.ps1 -Exe apps/wordside/target/release/wordside.exe -Runtime
 ```
 
-取词相关的完整过滤器清单以 `.github/workflows/ci.yml` 为准。
+`cargo test` 不操作桌面、不连网，也不碰系统剪贴板。
 
 ## 必须遵守
 
-- **不要运行宽泛的 `capture::` 过滤器。** 它包含操作真实窗口的实机夹具。
+- **不要直接跑 `cargo test -- --ignored`。** 被忽略的是操作真实窗口、剪贴板和声音设备的实机测试，按[开发指南](docs/DEVELOPMENT.md)逐个指定运行。
 - **不绕过 Cambridge 的人机验证。** 不伪装指纹，不自动完成验证，不逐个换代理出口。
 - **不改应用标识** `local.wordside.dictionary.api-preview`，否则用户设置会丢失。
 - **读取单词 API 只搬不改。** 除路径和模块引用外不改逻辑，输出的 JSON 不变。
@@ -49,11 +47,12 @@ npm run build
 
 ## 改动方式
 
-- `main` 不直接提交。按里程碑开短期分支和 PR，CI 通过后 squash 合并，不为每个小改动单独开 PR。
-- 文档和计划攒在本地，到一个阶段再随下一个 PR 一起推送。取词层拆分和发布例外：取词层一个模块一个 PR，发布必须走 PR 和 CI。
+- `main` 不直接提交。按里程碑开短期分支和 PR，squash 合并，不为每个小改动单独开 PR。
+- CI 按改了哪些文件执行，规则见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#github-ci)：改了代码的 PR 等对应检查通过再合并；只改文档的 PR 不跑 CI；合并到 main 后不再重跑。不要为了“保险”手动重跑已经通过的同一份代码。
+- 文档和计划攒在本地，到一个阶段再随下一个 PR 一起推送。发布走 PR；只改版本号和文档的发布 PR，代码已在之前的 PR 检查过，维护者可以不等 CI 合并。
 - `refactor:` 不改行为；移动代码和修改逻辑分开提交；重构中发现的 bug 开 `fix/` 分支单独修。
-- 保留下来的模块测试数量不能减少；PR 如实写明跑过什么、没测什么，模拟结果不能算实机通过。
-- 取词层只拆结构，判断逻辑和时序不变；一个 PR 只动一个模块，并附实测结果。
+- 测试数量不能减少；PR 如实写明跑过什么、没测什么，模拟结果不能算实机通过。
+- 改取词的判断逻辑或时序，一个 PR 只动一处，并附实机测试结果。
 - 推送、创建 PR、合并、打标签、发布前都要先得到维护者同意。
 
 ## 排查提示
