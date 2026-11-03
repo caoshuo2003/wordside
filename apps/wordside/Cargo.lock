@@ -1533,7 +1533,7 @@ dependencies = [
 
 [[package]]
 name = "wordside"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "dom_query",
  "idna_adapter",
