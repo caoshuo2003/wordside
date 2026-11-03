@@ -1,10 +1,14 @@
 name: CI
 
+# Nothing CI runs reads Markdown or docs/, so a change to those alone skips it. A change
+# that touches anything else, this file included, runs everything.
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**"]
   workflow_dispatch:
 
 permissions:
