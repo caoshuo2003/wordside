@@ -144,7 +144,7 @@ apps/wordside/src/
 ├─ render.rs        DirectWrite 排版、命中测试、Direct2D 绘制
 ├─ settings.rs      设置读写（含 0.2.0 字段兼容、原子写入）
 ├─ tray.rs、menu.rs、icon.rs   托盘、系统菜单、代码绘制的图标
-├─ audio.rs         下载到内存、Media Foundation 播放
+├─ audio.rs         下载到内存、Media Foundation 解码、XAudio2 播放
 ├─ service.rs、lookup.rs、cache.rs、entry.rs、presentation.rs   查询编排、词条校验、提示文案
 ├─ dictionary/      读取单词 API，原样搬移
 ├─ selection_input.rs   从 0.2.0 原样复制
@@ -162,15 +162,16 @@ apps/wordside/src/
 | 渲染 | 软件渲染为默认，隐藏时释放绘制目标和排版对象并裁剪工作集 | 原型测得首屏 37 ms、私有内存 10.5 MB；GPU 渲染约 200 ms、40.8 MB |
 | 玻璃效果 | 默认用未公开的 `SetWindowCompositionAttribute`，调用失败或系统关闭透明效果就退回不透明；在其他电脑确认公开的 `DWMSBT_TRANSIENTWINDOW` 不抢焦点也有效后再切换 | 原型中前者不抢焦点时有效，性能几乎不变；后者在开发机上没有效果 |
 | 字体 | 用系统字体（Segoe UI、微软雅黑、Georgia），不内置 | 内置中文字体子集约 1 MB，占预算太多 |
-| 网络 | 继续用 reqwest + rustls | 读取单词 API 不动；原型已证明体积够用 |
-| 发音 | Windows Media Foundation | 不引入 MP3 解码库。音频只从 Cambridge 下载到内存（上限 2 MB、10 秒），用媒体引擎从内存播放，不写磁盘；停止或隐藏卡片即释放 |
+| 网络 | reqwest，TLS 用 Windows 自带的 Schannel（`native-tls`），域名只认 ASCII（`idna_adapter` 1.0） | 读取单词 API 的逻辑不动，解析输出与 0.3.0 逐字节相同；不再自带 rustls、ring、根证书和 ICU 表，exe 小约 1 MB，证书跟随系统（公司代理的证书也认） |
+| 发音 | Media Foundation 解码，XAudio2 播放 | 不引入 MP3 解码库。音频只从 Cambridge 下载到内存（上限 2 MB、10 秒），不写磁盘。原先每次用新的媒体引擎播放，新开的音频流会吞掉开头（`dictionary` 只剩 `tionary`），快速切换读音时必然出现；现在连续播放共用一条保持打开的输出流，刚打开时在声音前垫 0.4 秒静音等设备唤醒。闲置 8 秒或卡片收起就关闭，托盘待命时不占资源 |
 | 取词和界面解耦（N3 实际做法） | 不拆模块：0.2.0 的取词层整体搬入，只换掉 Tauri 那一层；判断规则、时序常数和剪贴板事务原样 | 拆分的风险比收益大；0.2.0 的取词已经实测过，接口换掉后同一套用例照样能跑 |
 | 实机测试隔离 | 标记 `#[ignore]`，另设显式命令运行 | `cargo test` 默认安全，不再需要 16 个过滤器 |
 | 取消机制 | 中止查询任务，界面只接受最新序号的结果 | 去掉 30 ms 轮询，也不用再共享计数器 |
 | 空闲时运行时 | tokio 运行时首次查询时才创建 | 保持后台占用低 |
 | 图标 | 用 Direct2D 在代码里画；托盘按需现画，软件图标用 `--export-icon` 导出成 `assets/wordside.ico`，由 `build.rs` 调 Windows SDK 的 `rc.exe` 嵌进 exe | 不加构建依赖；托盘图标在任何缩放下都清晰并能随任务栏变色；找不到 `rc.exe` 时照常编译，只是没有图标 |
 | 托盘和右键菜单 | 系统菜单，不自绘 | 跟随系统主题，屏幕阅读器可读，不占内存 |
-| 第三方许可 | `tools/build-licenses.mjs --crate apps/wordside` 生成，编进 exe；设置页里点开时写到临时文件夹用文本编辑器打开 | 单个 exe 也带着许可；约 400 KB 放不进卡片 |
+| 第三方许可 | `tools/build-licenses.mjs --crate apps/wordside` 生成，`build.rs` 压缩后编进 exe；设置页里点开时解压、写到临时文件夹用文本编辑器打开 | 单个 exe 也带着许可；约 290 KB 放不进卡片，压缩后只占 31 KB |
+| 体积 | `opt-level = "z"`，regex 只留 `\s` 和大小写折叠用到的 Unicode 表 | 0.3.0 的 4.24 MB 降到 2.46 MB；480 页解析耗时与 `"s"` 相同（约 220 ms） |
 
 **这次要解决的旧问题：** `main.rs` 职责过多；设置更新重复 4 次；5 个计数器的递增散落各处；取词判断和 `unsafe` 调用混在一起；9 个测试用例 CI 从未运行；没有 clippy；CI 单次 17–22 分钟；版本号散落在 6 个文件；发布全部手工。
 

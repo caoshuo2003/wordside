@@ -36,6 +36,20 @@ impl Service {
             .unwrap_or_else(|_| Err(LookupError::other("CAMBRIDGE_TIMEOUT")))
     }
 
+    /// A selected word, or the first of its fallbacks the dictionary has. Returns the word
+    /// that was looked up.
+    pub async fn lookup_selection(
+        &self,
+        words: Vec<String>,
+        refresh: bool,
+    ) -> (String, Result<Entry, LookupError>) {
+        first_found(
+            words,
+            |word| async move { self.lookup(&word, refresh).await },
+        )
+        .await
+    }
+
     fn gate(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
         let mut gates = self.gates.lock().unwrap();
         gates.retain(|_, gate| gate.strong_count() > 0);
@@ -104,10 +118,77 @@ where
     }
 }
 
+/// Tries the words in order while the dictionary has none of them. Anything but a miss
+/// (blocked, offline) ends there; a miss in all of them reports the first one's.
+pub async fn first_found<F, Fut>(
+    words: Vec<String>,
+    lookup: F,
+) -> (String, Result<Entry, LookupError>)
+where
+    F: Fn(String) -> Fut,
+    Fut: Future<Output = Result<Entry, LookupError>>,
+{
+    let mut first: Option<(String, Result<Entry, LookupError>)> = None;
+    for word in words {
+        let result = lookup(word.clone()).await;
+        if !matches!(&result, Err(error) if error.not_found) {
+            return (word, result);
+        }
+        first.get_or_insert((word, result));
+    }
+    first.unwrap_or_else(|| (String::new(), Err(LookupError::other("LOOKUP_FAILED"))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    async fn first_of(
+        words: &[&str],
+        answers: &[(&str, Result<Entry, LookupError>)],
+    ) -> ((String, Result<Entry, LookupError>), Vec<String>) {
+        let calls = RefCell::new(Vec::new());
+        let found = first_found(words.iter().map(|w| (*w).to_owned()).collect(), |word| {
+            calls.borrow_mut().push(word.clone());
+            let answer = answers
+                .iter()
+                .find(|(w, _)| *w == word)
+                .map(|(_, answer)| answer.clone())
+                .unwrap_or_else(|| Err(missing(&[])));
+            async move { answer }
+        })
+        .await;
+        (found, calls.into_inner())
+    }
+
+    #[tokio::test]
+    async fn a_selection_falls_back_only_after_a_miss() {
+        let words = ["e record", "record"];
+        let ((word, result), calls) = first_of(&words, &[("record", Ok(entry("record")))]).await;
+        assert_eq!(
+            (word.as_str(), result.unwrap().word.as_str()),
+            ("record", "record")
+        );
+        assert_eq!(calls, words);
+
+        let ((word, _), calls) = first_of(&words, &[("e record", Ok(entry("e record")))]).await;
+        assert_eq!(word, "e record");
+        assert_eq!(calls, ["e record"]);
+
+        let blocked = Err(LookupError::other("CAMBRIDGE_BLOCKED"));
+        let ((word, result), calls) = first_of(&words, &[("e record", blocked)]).await;
+        assert_eq!(
+            (word.as_str(), result.unwrap_err().code.as_str()),
+            ("e record", "CAMBRIDGE_BLOCKED")
+        );
+        assert_eq!(calls, ["e record"]);
+
+        let ((word, result), _) =
+            first_of(&words, &[("e record", Err(missing(&["erecord"])))]).await;
+        assert_eq!(word, "e record");
+        assert_eq!(result.unwrap_err().suggestions, ["erecord"]);
+    }
 
     fn entry(word: &str) -> Entry {
         read_api_entry(

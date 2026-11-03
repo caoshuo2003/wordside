@@ -1,0 +1,454 @@
+[
+  {
+    "raw": " `terminal,` ",
+    "expected": "terminal"
+  },
+  {
+    "raw": "“runtime”。",
+    "expected": "runtime"
+  },
+  {
+    "raw": "(runtime),",
+    "expected": "runtime"
+  },
+  {
+    "raw": "runtime()",
+    "expected": "runtime"
+  },
+  {
+    "raw": "<runtime>",
+    "expected": "runtime"
+  },
+  {
+    "raw": "【runtime】",
+    "expected": "runtime"
+  },
+  {
+    "raw": "「runtime」",
+    "expected": "runtime"
+  },
+  {
+    "raw": "…runtime…",
+    "expected": "runtime"
+  },
+  {
+    "raw": "• runtime |",
+    "expected": "runtime"
+  },
+  {
+    "raw": "_runtime_",
+    "expected": "runtime"
+  },
+  {
+    "raw": "**runtime**",
+    "expected": "runtime"
+  },
+  {
+    "raw": "runtime=",
+    "expected": "runtime"
+  },
+  {
+    "raw": "#runtime!",
+    "expected": "runtime"
+  },
+  {
+    "raw": " + runtime & ",
+    "expected": "runtime"
+  },
+  {
+    "raw": "don’t",
+    "expected": "don't"
+  },
+  {
+    "raw": "rock ’n’ roll",
+    "expected": "rock 'n' roll"
+  },
+  {
+    "raw": "run-time",
+    "expected": "run-time"
+  },
+  {
+    "raw": " one  two three ",
+    "expected": "one two three"
+  },
+  {
+    "raw": "terminal\r\n",
+    "expected": "terminal"
+  },
+  {
+    "raw": "termnal",
+    "expected": "termnal"
+  },
+  {
+    "raw": "--runtime",
+    "expected": "runtime"
+  },
+  {
+    "raw": "-runtime",
+    "expected": "runtime"
+  },
+  {
+    "raw": "foo\nbar",
+    "expected": null
+  },
+  {
+    "raw": "foo\tbar",
+    "expected": null
+  },
+  {
+    "raw": "C:\\Users\\Admin",
+    "expected": null
+  },
+  {
+    "raw": "/usr/bin/runtime",
+    "expected": null
+  },
+  {
+    "raw": "https://example.com",
+    "expected": null
+  },
+  {
+    "raw": "foo/bar",
+    "expected": null
+  },
+  {
+    "raw": "runtime.log",
+    "expected": null
+  },
+  {
+    "raw": "rm -rf /",
+    "expected": null
+  },
+  {
+    "raw": "one two three four five six",
+    "expected": null
+  },
+  {
+    "raw": "12345",
+    "expected": null
+  },
+  {
+    "raw": "***",
+    "expected": null
+  },
+  {
+    "raw": "中文runtime",
+    "expected": "runtime"
+  },
+  {
+    "raw": "使用runtime的",
+    "expected": "runtime"
+  },
+  {
+    "raw": "在 runtime 中",
+    "expected": "runtime"
+  },
+  {
+    "raw": "run中time",
+    "expected": null
+  },
+  {
+    "raw": "record[1]",
+    "expected": "record"
+  },
+  {
+    "raw": "record¹",
+    "expected": "record"
+  },
+  {
+    "raw": "²record",
+    "expected": "record"
+  },
+  {
+    "raw": "1.record",
+    "expected": "record"
+  },
+  {
+    "raw": "record2",
+    "expected": "record2"
+  },
+  {
+    "raw": "mp3,",
+    "expected": "mp3"
+  },
+  {
+    "raw": "COVID-19.",
+    "expected": "COVID-19"
+  },
+  {
+    "raw": "©record®",
+    "expected": "record"
+  },
+  {
+    "raw": "record™",
+    "expected": "record"
+  },
+  {
+    "raw": "→record←",
+    "expected": "record"
+  },
+  {
+    "raw": "😀record",
+    "expected": "record"
+  },
+  {
+    "raw": "~record@",
+    "expected": "record"
+  },
+  {
+    "raw": "record」，",
+    "expected": "record"
+  },
+  {
+    "raw": "café",
+    "expected": null
+  },
+  {
+    "raw": "naïve",
+    "expected": null
+  },
+  {
+    "raw": "рecord",
+    "expected": null
+  },
+  {
+    "raw": "rm -rf",
+    "expected": null
+  },
+  {
+    "raw": "git commit -m",
+    "expected": null
+  },
+  {
+    "raw": "user@example.com",
+    "expected": null
+  },
+  {
+    "raw": "a=b",
+    "expected": null
+  },
+  {
+    "raw": "and/or",
+    "expected": null
+  },
+  {
+    "raw": "中文",
+    "expected": null
+  },
+  {
+    "raw": "[1]",
+    "expected": null
+  },
+  {
+    "raw": " Dictionary. T",
+    "expected": "Dictionary"
+  },
+  {
+    "raw": "Dictionary. Th",
+    "expected": "Dictionary"
+  },
+  {
+    "raw": "e. Dictionary",
+    "expected": "Dictionary"
+  },
+  {
+    "raw": "Dictionary, a",
+    "expected": "Dictionary"
+  },
+  {
+    "raw": "Dictionary! 2",
+    "expected": "Dictionary"
+  },
+  {
+    "raw": "“Dictionary.” T",
+    "expected": "Dictionary"
+  },
+  {
+    "raw": "s. run on the spot; a",
+    "expected": "run on the spot"
+  },
+  {
+    "raw": "Dictionary。T",
+    "expected": null
+  },
+  {
+    "raw": "word. The",
+    "expected": null
+  },
+  {
+    "raw": "e.g. word",
+    "expected": null
+  },
+  {
+    "raw": "U.S. army",
+    "expected": null
+  },
+  {
+    "raw": "Dictionary.T",
+    "expected": null
+  },
+  {
+    "raw": "a. b",
+    "expected": null
+  },
+  {
+    "raw": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "expected": null
+  },
+  {
+    "raw": "(((((((((((((((((((((xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx)",
+    "expected": null
+  },
+  {
+    "raw": "",
+    "expected": null
+  },
+  {
+    "raw": "﻿runtime﻿",
+    "expected": "runtime"
+  },
+  {
+    "raw": "one﻿two",
+    "expected": "one two"
+  },
+  {
+    "raw": "runtime",
+    "expected": null
+  },
+  {
+    "raw": "-workspace",
+    "expected": "workspace"
+  },
+  {
+    "raw": "--workspace",
+    "expected": "workspace"
+  },
+  {
+    "raw": "workspace-",
+    "expected": "workspace"
+  },
+  {
+    "raw": "---workspace---",
+    "expected": "workspace"
+  },
+  {
+    "raw": " ( -workspace ), ",
+    "expected": "workspace"
+  },
+  {
+    "raw": "-state-of-the-art-",
+    "expected": "state-of-the-art"
+  },
+  {
+    "raw": "---don’t---",
+    "expected": "don't"
+  },
+  {
+    "raw": "‐workspace‐",
+    "expected": "workspace"
+  },
+  {
+    "raw": "‑workspace‑",
+    "expected": "workspace"
+  },
+  {
+    "raw": "‒workspace‒",
+    "expected": "workspace"
+  },
+  {
+    "raw": "―workspace―",
+    "expected": "workspace"
+  },
+  {
+    "raw": "−workspace−",
+    "expected": "workspace"
+  },
+  {
+    "raw": "﹘workspace﹘",
+    "expected": "workspace"
+  },
+  {
+    "raw": "﹣workspace﹣",
+    "expected": "workspace"
+  },
+  {
+    "raw": "－workspace－",
+    "expected": "workspace"
+  },
+  {
+    "raw": "–workspace—",
+    "expected": "workspace"
+  },
+  {
+    "raw": "“--WORKSPACE--”。",
+    "expected": "WORKSPACE"
+  },
+  {
+    "raw": " --  workspace — ",
+    "expected": "workspace"
+  },
+  {
+    "raw": "well‐known",
+    "expected": "well-known"
+  },
+  {
+    "raw": "well‑known",
+    "expected": "well-known"
+  },
+  {
+    "raw": "“‑well‑known‑”",
+    "expected": "well-known"
+  },
+  {
+    "raw": "---",
+    "expected": null
+  },
+  {
+    "raw": "---[]--",
+    "expected": null
+  },
+  {
+    "raw": "- 123 -",
+    "expected": null
+  },
+  {
+    "raw": "-/workspace",
+    "expected": null
+  },
+  {
+    "raw": "--workspace=/tmp",
+    "expected": null
+  },
+  {
+    "raw": "--workspace.log--",
+    "expected": null
+  },
+  {
+    "raw": "-workspace_name-",
+    "expected": null
+  },
+  {
+    "raw": "-workspace\nnext-",
+    "expected": null
+  },
+  {
+    "raw": "one—two",
+    "expected": null
+  },
+  {
+    "raw": "-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-",
+    "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "raw": "-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-",
+    "expected": null
+  },
+  {
+    "raw": "----------xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx----------",
+    "expected": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  },
+  {
+    "raw": "-----------xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-----------",
+    "expected": null
+  }
+]
