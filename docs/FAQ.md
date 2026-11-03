@@ -1,12 +1,12 @@
 # 常见问题
 
-[下载 WordSide · 词伴](https://github.com/caoshuo2003/wordside/releases/tag/v0.3.0) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
+[下载 WordSide · 词伴](https://github.com/caoshuo2003/wordside/releases/tag/v0.3.1) · [使用指南](USER-GUIDE.md) · [隐私与数据](PRIVACY.md) · [返回首页](../README.md)
 
 ## 安装与运行
 
 **第一次使用应该下载哪个文件？**
 
-推荐 `WordSide_0.3.0_x64-setup.exe`，按提示安装即可：只装给当前用户，不需要管理员权限，开始菜单里会有 WordSide，还可以选开机自动启动。不想安装的，下载 `WordSide_0.3.0.exe` 放到任意文件夹双击运行；想要附带使用说明和第三方许可的压缩包，选择 `WordSide_0.3.0-portable.zip`。
+推荐 `WordSide_0.3.1_x64-setup.exe`，按提示安装即可：只装给当前用户，不需要管理员权限，开始菜单里会有 WordSide，还可以选开机自动启动。不想安装的，下载 `WordSide_0.3.1.exe` 放到任意文件夹双击运行；想要附带使用说明和第三方许可的压缩包，选择 `WordSide_0.3.1-portable.zip`。
 
 **怎么开机自动启动？**
 
@@ -18,7 +18,7 @@ WordSide 没有数字签名，Windows 会对不常见的程序提示。点“更
 
 **还需要 WebView2 吗？**
 
-不需要。0.3.0 是原生程序，不依赖 WebView2 或其他运行库。
+不需要。0.3.0 起是原生程序，不依赖 WebView2 或其他运行库。
 
 **运行后没看到窗口怎么办？**
 
@@ -26,7 +26,7 @@ WordSide 没有数字签名，Windows 会对不常见的程序提示。点“更
 
 **0.2.0 还要保留吗？**
 
-不需要，两者同时运行会互相抢快捷键和取词。先在托盘右键退出 0.2.0，再运行 0.3.0 的安装包，它会自动卸载已安装的 0.2.0；用 0.2.0 便携版的，删除旧文件夹即可。设置保存在同一个位置，0.3.0 会沿用自动划词开关、快捷键和浅色/深色。
+不需要，两者同时运行会互相抢快捷键和取词。先在托盘右键退出 0.2.0，再运行新版安装包，它会自动卸载已安装的 0.2.0；用 0.2.0 便携版的，删除旧文件夹即可。设置保存在同一个位置，新版会沿用自动划词开关、快捷键和浅色/深色。
 
 **设置保存在哪里？**
 
@@ -77,7 +77,7 @@ WordSide 直接访问 [Cambridge Dictionary](https://dictionary.cambridge.org/)�
 ```powershell
 $env:HTTPS_PROXY = 'http://127.0.0.1:7890'
 $env:HTTP_PROXY = 'http://127.0.0.1:7890'
-& '.\WordSide_0.3.0.exe'
+& '.\WordSide_0.3.1.exe'
 ```
 
 先在托盘右键退出 WordSide，再进入 EXE 所在目录执行这些命令。它们只影响这个 PowerShell 窗口及从中启动的程序。
