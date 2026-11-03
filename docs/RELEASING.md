@@ -48,7 +48,7 @@ THIRD-PARTY-LICENSES_<版本>.txt
 
 ## 3 · 合入与打标签
 
-PR 的实际 CI 通过后合入 main，确认工作树干净并创建 annotated tag：
+发布 PR 合入 main 后，确认工作树干净并创建 annotated tag。发布 PR 如果只改版本号和文档，代码已在之前的 PR 上通过检查，不用等它的 CI；本地的 `cargo test` 和 `check-wordside.ps1 -Runtime` 照常要跑。
 
 ```sh
 git switch main
@@ -71,7 +71,7 @@ gh release create v0.2.0 --repo caoshuo2003/wordside \
   release/v0.2.0/WordSide_0.2.0-portable.zip release/v0.2.0/THIRD-PARTY-LICENSES_0.2.0.txt
 ```
 
-发布前确认目标仓库、版本标签、Release 附件和实际 CI 结果一致。正式版使用 `--latest` 作为默认下载版本；提前试用的版本使用 `--prerelease --latest=false`。发布说明面向使用者，不重复粘贴构建日志与测试清单。
+发布前确认目标仓库、版本标签和 Release 附件一致，标签指向的代码已在 PR 上通过 CI；发布后把附件下载回来，和本地成品比对 SHA256。正式版使用 `--latest` 作为默认下载版本；提前试用的版本使用 `--prerelease --latest=false`。发布说明面向使用者，不重复粘贴构建日志与测试清单。
 
 已有预发布版转正式版时，若程序和版本号保持一致，可沿用同一标签与附件：
 

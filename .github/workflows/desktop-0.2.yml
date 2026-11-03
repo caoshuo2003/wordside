@@ -1,0 +1,101 @@
+name: 0.2.0 desktop
+
+# The 0.2.0 Tauri app (desktop/), kept buildable until N5 retires it. About 20 minutes, so
+# it runs only on pull requests that change 0.2.0, the code it shares with the word API,
+# or the tools it builds with; changes to apps/wordside or documentation leave it alone.
+# A merge to main is not checked again. After editing this file, run it by hand from
+# Actions once.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "desktop/**"
+      - "shared/**"
+      - "modules/**"
+      - "package.json"
+      - "package-lock.json"
+      - ".node-version"
+      - "tools/build-ui.mjs"
+      - "tools/build-licenses.mjs"
+      - "tools/windows-cargo.ps1"
+      - "tools/generate-native-fixtures.cjs"
+      - "!**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  javascript:
+    name: JavaScript and UI (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm exec --yes --package=pnpm@9.15.9 -- pnpm --dir modules/cambridge-dictionary-api install --frozen-lockfile
+      - run: npm test
+      - run: npm run check
+      - run: npm run build
+
+  windows-native:
+    name: Windows native
+    runs-on: windows-latest
+    timeout-minutes: 35
+    env:
+      CARGO_BUILD_JOBS: "4"
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - run: npm ci
+      - run: npm exec --yes --package=pnpm@9.15.9 -- pnpm --dir modules/cambridge-dictionary-api install --frozen-lockfile
+      - run: npm test
+      - run: npm run check
+      - name: Check Rust toolchain
+        run: |
+          rustup show active-toolchain
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo --version
+      - name: Check Rust formatting
+        working-directory: desktop/src-tauri
+        run: cargo fmt --all -- --check
+      - name: Test native dictionary and application logic
+        run: ./tools/windows-cargo.ps1 -Action test
+      - name: Test selection and hotkey logic (no desktop or system clipboard)
+        run: |
+          $filters = @(
+            'capture::shortcut::',
+            'capture::tests::',
+            'capture::copy_policy::',
+            'capture::timing::',
+            'capture::windows_copy::tests::',
+            'capture::windows_copy::ole::tests::',
+            'capture::input::tests::',
+            'capture::windows_text::semantics_tests::',
+            'capture::diagnostics::tests::',
+            'capture::hotkey::tests::',
+            'capture::windows::tests::',
+            'capture::compatibility::tests::',
+            'capture::selection::tests::',
+            'capture::probe::protocol_tests::',
+            'capture::windows_edit::tests::',
+            'dismissal::tests::'
+          )
+          foreach ($filter in $filters) {
+            ./tools/windows-cargo.ps1 -Action test -TestFilter $filter
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }

@@ -167,11 +167,15 @@ npm test
 
 ## GitHub CI
 
-`.github/workflows/ci.yml` 在 main push、目标为 main 的 PR 与手动触发时执行：
+CI 只在目标为 main 的 PR 上、按改了哪些文件执行；合并到 main 后不再重跑同样的内容。两个 workflow 都可以在 Actions 里手动运行。
 
-- Linux：锁文件安装、JS 测试、TypeScript 与 UI 构建。
-- Windows：同样检查，另外执行原生逻辑、纯快捷键解析及上述取词事务检查。
-- Windows（apps/wordside）：格式、clippy、测试、生成第三方许可、正式编译、`check-wordside.ps1` 发布自检；依赖和编译结果有缓存。
+| 改了什么 | 执行 | 用时 |
+|---|---|---|
+| 只有 `*.md`、`docs/` | 不执行 | — |
+| `apps/wordside/`、`tools/build-licenses.mjs`、`tools/check-wordside.ps1` | `wordside.yml`：格式、clippy、测试、第三方许可、正式编译、`check-wordside.ps1`；依赖和编译结果有缓存 | 约 5 分钟 |
+| `desktop/`、`shared/`、`modules/`、npm 配置、0.2.0 的构建工具 | `desktop-0.2.yml`：Linux 上 JS 测试和 UI 构建；Windows 上同样检查，另外执行 0.2.0 的原生逻辑、快捷键解析和取词事务检查 | 约 20 分钟 |
+
+改 workflow 文件本身：`wordside.yml` 会在自己的 PR 上执行；`desktop-0.2.yml` 不会，改完在 Actions 里手动运行一次。N5 退役 `desktop/` 时一并删除 `desktop-0.2.yml`。
 
 CI 覆盖源码与自动化检查；真实桌面、安装和发布各自单独执行并记录。远端检查状态以 GitHub Actions 的实际结果为准。
 

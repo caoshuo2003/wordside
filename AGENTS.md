@@ -33,7 +33,7 @@ npm run build
 .\tools\windows-cargo.ps1 -Action test -TestFilter 'capture::copy_policy::'
 ```
 
-取词相关的完整过滤器清单以 `.github/workflows/ci.yml` 为准。
+0.2.0 取词相关的完整过滤器清单以 `.github/workflows/desktop-0.2.yml` 为准。
 
 ## 必须遵守
 
@@ -49,8 +49,9 @@ npm run build
 
 ## 改动方式
 
-- `main` 不直接提交。按里程碑开短期分支和 PR，CI 通过后 squash 合并，不为每个小改动单独开 PR。
-- 文档和计划攒在本地，到一个阶段再随下一个 PR 一起推送。取词层拆分和发布例外：取词层一个模块一个 PR，发布必须走 PR 和 CI。
+- `main` 不直接提交。按里程碑开短期分支和 PR，squash 合并，不为每个小改动单独开 PR。
+- CI 按改了哪些文件执行，规则见 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md#github-ci)：改了代码的 PR 等对应检查通过再合并；只改文档的 PR 不跑 CI；合并到 main 后不再重跑。不要为了“保险”手动重跑已经通过的同一份代码。
+- 文档和计划攒在本地，到一个阶段再随下一个 PR 一起推送。取词层拆分和发布例外：取词层一个模块一个 PR；发布走 PR，只改版本号和文档的发布 PR，代码已在之前的 PR 检查过，维护者可以不等 CI 合并。
 - `refactor:` 不改行为；移动代码和修改逻辑分开提交；重构中发现的 bug 开 `fix/` 分支单独修。
 - 保留下来的模块测试数量不能减少；PR 如实写明跑过什么、没测什么，模拟结果不能算实机通过。
 - 取词层只拆结构，判断逻辑和时序不变；一个 PR 只动一个模块，并附实测结果。
